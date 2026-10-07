@@ -3,3 +3,25 @@ ScheduleMeeting/package-lock.json
 ScheduleMeeting/config.json
 ScheduleMeeting/Asr/Google/GoogleCloudKeys.json
 
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# CocoaPods
+Pods/
+Podfile.lock
+Example/*.xcworkspace/
+
+# Xcode build output and user settings
+DerivedData/
+build/
+*.xcodeproj/project.xcworkspace/
+xcuserdata/
+*.xcuserstate
+*.xcarchive/
+*.dSYM/
+*.ipa

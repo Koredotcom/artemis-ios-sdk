@@ -1,1 +1,0 @@
-forever -c "/data/nvm8.16.2/node-v8.16.2-linux-x64/bin/node" start /var/www/ScheduleMeeting/app.js 
