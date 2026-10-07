@@ -30,7 +30,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-          .package(url: "https://github.com/Koredotcom/artemis-ios-sdk", .upToNextMajor(from: “1.0.0”))
+          .package(url: "https://github.com/Koredotcom/artemis-ios-sdk", .upToNextMajor(from: "1.0.1"))
       ]
 ```
 
@@ -39,7 +39,7 @@ dependencies: [
 Add to your `Podfile`:
 
 ```ruby
-pod 'ArtemisSocketSDK', '1.0.0'
+pod 'ArtemisSocketSDK', '1.0.1'
 ```
 
 Then run:

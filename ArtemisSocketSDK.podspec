@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'ArtemisSocketSDK'
-  s.version          = '1.0.0'
+  s.version          = '1.0.1'
   s.summary          = 'Native iOS SDK for Artemis agent WebSocket chat'
   s.description      = <<-DESC
     Artemis Socket SDK provides a native Swift SDK for connecting to the Artemis
@@ -17,6 +17,9 @@ Pod::Spec.new do |s|
   s.module_name = 'ArtemisSocketSDK'
 
   s.source_files = 'Sources/ArtemisSocketSDK/**/*.swift'
+  s.resource_bundles = {
+    'ArtemisSocketSDK_Privacy' => ['Sources/ArtemisSocketSDK/PrivacyInfo.xcprivacy']
+  }
   s.frameworks = 'Foundation', 'Combine'
 
   # CocoaPods trunk currently publishes Yams up to 5.0.6 (SPM has newer releases).
