@@ -4,14 +4,29 @@ import PackageDescription
 let package = Package(
     name: "ArtemisUISDK",
     platforms: [.iOS(.v15), .macOS(.v12)],
-    products: [.library(name: "ArtemisUISDK", targets: ["ArtemisUISDK"])],
+    products: [
+        .library(name: "ArtemisUISDK", targets: ["ArtemisUISDK"]),
+        .library(name: "ArtemisSocketSDK", targets: ["ArtemisSocketSDK"]),
+    ],
     dependencies: [
-        .package(url: "https://github.com/Koredotcom/artemis-ios-sdk", exact: "1.0.1")
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
     ],
     targets: [
-        .target(name: "ArtemisUISDK", dependencies: [
-            .product(name: "ArtemisSocketSDK", package: "artemis-ios-sdk")
-        ], path: "Sources/ArtemisUISDK"),
-        .testTarget(name: "ArtemisUISDKTests", dependencies: ["ArtemisUISDK"], path: "Tests/ArtemisUISDKTests")
+        .target(
+            name: "ArtemisSocketSDK",
+            dependencies: ["Yams"],
+            path: "Sources/ArtemisSocketSDK",
+            resources: [.process("PrivacyInfo.xcprivacy")]
+        ),
+        .target(
+            name: "ArtemisUISDK",
+            dependencies: ["ArtemisSocketSDK"],
+            path: "Sources/ArtemisUISDK"
+        ),
+        .testTarget(
+            name: "ArtemisUISDKTests",
+            dependencies: ["ArtemisUISDK"],
+            path: "Tests/ArtemisUISDKTests"
+        ),
     ]
 )

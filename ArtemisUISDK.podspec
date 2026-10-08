@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'ArtemisUISDK'
-  s.version          = '1.0.2'
+  s.version          = '1.0.3'
   s.summary          = 'Native iOS UI SDK for Artemis agent chat'
   s.description      = <<-DESC
     Artemis UI SDK provides a native SwiftUI chat experience with connection
