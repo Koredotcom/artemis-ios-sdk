@@ -2,33 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "ArtemisSocketSDK",
-    platforms: [
-        .iOS(.v15),
-        .macOS(.v12),
-    ],
-    products: [
-        .library(
-            name: "ArtemisSocketSDK",
-            targets: ["ArtemisSocketSDK"]
-        ),
-    ],
+    name: "ArtemisUISDK",
+    platforms: [.iOS(.v15), .macOS(.v12)],
+    products: [.library(name: "ArtemisUISDK", targets: ["ArtemisUISDK"])],
     dependencies: [
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
+        .package(url: "https://github.com/Koredotcom/artemis-ios-sdk", exact: "1.0.1")
     ],
     targets: [
-        .target(
-            name: "ArtemisSocketSDK",
-            dependencies: ["Yams"],
-            path: "Sources/ArtemisSocketSDK",
-            resources: [
-                .process("PrivacyInfo.xcprivacy"),
-            ]
-        ),
-        .testTarget(
-            name: "ArtemisSocketSDKTests",
-            dependencies: ["ArtemisSocketSDK"],
-            path: "Tests/ArtemisSocketSDKTests"
-        ),
+        .target(name: "ArtemisUISDK", dependencies: [
+            .product(name: "ArtemisSocketSDK", package: "artemis-ios-sdk")
+        ], path: "Sources/ArtemisUISDK"),
+        .testTarget(name: "ArtemisUISDKTests", dependencies: ["ArtemisUISDK"], path: "Tests/ArtemisUISDKTests")
     ]
 )

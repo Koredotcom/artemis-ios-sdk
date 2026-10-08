@@ -1,244 +1,200 @@
-# Artemis Socket SDK (Native iOS)
+# Artemis Native iOS UI SDK
 
-Native Swift SDK for the Artemis agent platform. This package is a full port of the Flutter `artemis_socket_plugin` Dart SDK, providing WebSocket chat, token management, session handling, streaming responses, history hydration, and interactive actions.
+SwiftUI implementation of the Artemis Flutter UI SDK contract.
 
-**Requirements:** iOS 15.0+, Swift 5.9+, Xcode 15+
-
-## Features
-
-- YAML/JSON configuration loading with validation
-- SDK token bootstrap (`POST /api/v1/sdk/init`) and refresh
-- WebSocket connection with ticket-based auth (legacy token auth fallback)
-- Session lifecycle (`session_start`, `end_session`, reconnect with exponential backoff)
-- Chat messaging with streaming (`response_start`, `response_chunk`, `response_end`)
-- Persisted history hydration via REST API
-- Interactive actions and feedback submission
-- Combine publishers and delegate-based event delivery
-- Swift Package Manager and CocoaPods distribution
-
-## Installation
+## Integration
 
 ### Swift Package Manager
 
-Add the package in Xcode:
-
-1. **File → Add Package Dependencies…**
-2. Enter the repository URL or choose **Add Local…** and select this directory
-3. Add the `ArtemisSocketSDK` library to your target
-
-Or add to `Package.swift`:
+Add this package dependency to your app's `Package.swift`, then add the `ArtemisUISDK` product to the app target in Xcode:
 
 ```swift
 dependencies: [
-          .package(url: "https://github.com/Koredotcom/artemis-ios-sdk", .upToNextMajor(from: "1.0.1"))
-      ]
+    .package(
+        url: "https://github.com/Koredotcom/artemis-ios-sdk",
+        exact: "1.0.2"
+    )
+]
 ```
 
-### CocoaPods
+### UIKit project
 
-Add to your `Podfile`:
-
-```ruby
-pod 'ArtemisSocketSDK', '1.0.1'
-```
-
-Then run:
-
-```bash
-pod install --repo-update
-```
-
-> **Note:** CocoaPods trunk publishes Yams up to `5.0.6`. The podspec uses `~> 5.0` to match that. SPM resolves newer Yams releases directly from GitHub.
-
-## Quick Start
-
-### 1. Add configuration
-
-Copy `sdk_configurations.yaml` into your app bundle (same format as the Flutter plugin):
-
-```yaml
-artemis_sdk:
-  environment: dev
-  connection:
-    project_id: "your-project-id"
-    api_key: "your-api-key"
-    endpoint: "https://agents-dev.kore.ai"
-  channel:
-    channel_id: "your-channel-id"
-  debug:
-    enabled: true
-    print_logs: true
-```
-
-### 2. Initialize and connect
+Import only `ArtemisUISDK` in the view controller that opens chat. It exposes `SDKConfiguration`, `ConnectionConfig`, and `ChannelConfig` for the parent app:
 
 ```swift
-import ArtemisSocketSDK
+import UIKit
+import ArtemisUISDK
 
-@MainActor
-final class ChatManager: AgentSDKDelegate {
-    private var sdk: AgentSDK?
+final class ViewController: UIViewController {
+    private let configuration = SDKConfiguration(
+        environment: "dev",
+        connection: ConnectionConfig(
+            projectId: "your-project-id",
+            endpoint: "https://runtime.example.com",
+            apiKey: "pk_your_public_key"
+        ),
+        channel: ChannelConfig(channelId: "your-channel-id")
+    )
 
-    func start() async {
-        do {
-            let sdk = try AgentSDK.initialize(fromBundle: .main)
-            sdk.delegate = self
-            self.sdk = sdk
-
-            let sessionId = try await sdk.connect()
-            print("Connected: \(sessionId)")
-        } catch {
-            print("Connection failed: \(error)")
-        }
-    }
-
-    func agentSDK(_ sdk: AgentSDK, didReceive event: SDKEvent) {
-        switch event {
-        case .connected(let sessionId):
-            print("Connected: \(sessionId)")
-        case .disconnected(let reason):
-            print("Disconnected: \(reason ?? "")")
-        case .error(let error, let code):
-            print("[\(code)] \(error)")
-        default:
-            break
-        }
-    }
-
-    func agentSDK(_ sdk: AgentSDK, didReceive chatEvent: ChatEvent) {
-        switch chatEvent {
-        case .messageReceived(let message):
-            print("\(message.role): \(message.content)")
-        case .typingIndicator(let isTyping):
-            print("Typing: \(isTyping)")
-        default:
-            break
-        }
+    @IBAction func tapsOnConnectBtnAction(_ sender: Any) {
+        AgentChatUI.show(in: self, configuration: configuration, title: "Support")
     }
 }
 ```
 
-### 3. Send messages
+Connect the action to a button and place the view controller in a `UINavigationController`. For a storyboard app, embed the initial view controller in a navigation controller; the [UIKit example](UIKitExample/ArtemisExample/ArtemisExample/ViewController.swift) wraps its root controller in `SceneDelegate.swift` instead. Replace the placeholder configuration with your project's values.
+
+`show(in:)` pushes chat onto that navigation stack, including a tab's navigation controller. It returns `false` if there is no navigation stack or chat is already on top. The close button pops back to the previous screen. The SDK hides the navigation bar while chat is visible and restores it afterward. The tab bar is hidden by default; pass `hidesBottomBarWhenPushed: false` to keep it visible. `animated` defaults to `true`.
+
+To open chat modally from any UIKit view controller, use:
 
 ```swift
-let messageId = try await sdk.sendMessage("Hello, Artemis!")
+AgentChatUI.present(from: self, configuration: configuration, title: "Support")
 ```
 
-## API Reference
+The SDK starts the chat connection when the screen appears and stops it when the screen closes. Use either Swift Package Manager or CocoaPods for a given app target.
 
-### AgentSDK
-
-| Method | Description |
-|--------|-------------|
-| `initialize(fromBundle:)` | Load config from app bundle YAML |
-| `initialize(from:)` | Load config from file URL |
-| `initialize(yaml:)` | Load config from YAML string |
-| `create(with:)` | Create SDK with programmatic config |
-| `connect()` | Connect and return session ID |
-| `disconnect()` | Client-initiated disconnect |
-| `endSession()` | Send `end_session` and disconnect |
-| `isConnected()` | Whether session is active |
-| `getSessionId()` | Current session ID |
-| `getWidgetConfig()` | Server-provided widget theme |
-| `sendMessage(_:metadata:attachmentIds:)` | Send chat message |
-| `submitAction(_:value:formData:renderId:)` | Submit UI action |
-| `submitFeedback(...)` | Submit message feedback |
-| `getMessages()` | Local message store |
-| `updateCustomData(_:)` | Attach data to outgoing messages |
-| `clearHistory()` | Clear local messages |
-| `dispose()` | Release resources |
-
-### Events
-
-**SDKEvent:** `connected`, `disconnected`, `reconnecting`, `error`, `idleTimeout`
-
-**ChatEvent:** `messageReceived`, `historyLoaded`, `messageStart`, `messageChunk`, `messageEnd`, `typingIndicator`, `thought`, `error`
-
-**SDKErrorCode:** `tokenInit`, `tokenRefresh`, `wsTicket`, `socketConnection`, `sessionStartTimeout`, `sendFailed`, `historyFetch`, `unknown`
-
-### Combine Publishers
+For a SwiftUI host:
 
 ```swift
-sdk.sdkEvents
-    .sink { event in /* handle SDK event */ }
-    .store(in: &cancellables)
-
-sdk.chatEvents
-    .sink { event in /* handle chat event */ }
-    .store(in: &cancellables)
+NavigationStack { AgentChatUI.view(configuration: configuration) }
 ```
 
-## Example App
+### Host view and template injection
 
-A SwiftUI example using the local CocoaPods spec is included:
+The parent app can replace the header and footer and register message-specific
+rich-content renderers. Import `SwiftUI` in the host file. Builders return
+`AnyView`, so they can contain any SwiftUI view hierarchy. Add a registry property
+to the host view controller or SwiftUI view:
 
-```bash
-cd Example
-pod install
-open ArtemisSocketExample.xcworkspace
+```swift
+private var templates: RichTemplateRegistry {
+    var registry = RichTemplateRegistry()
+    registry.register(RichTemplateRenderer(
+        type: "order_card",
+        matches: { message in
+            (message.metadata?["template"]?.value as? String) == "order_card" ||
+            (message.rawRichContent?["template"] as? String) == "order_card"
+        },
+        build: { message, context in
+            AnyView(VStack(alignment: .leading) {
+                Text("Order card")
+                Button("Confirm") {
+                    context.submitAction("confirm-order", "confirmed", nil, message.id)
+                }
+            })
+        }
+    ))
+    return registry
+}
 ```
 
-The example demonstrates:
+Pass the registry and builders from a SwiftUI host:
 
-- SDK initialization from bundled YAML config
-- Connect / disconnect / end session
-- Sending messages and displaying streaming responses
-- Typing indicators and connection state
-- Custom data attachment
-- Delegate and Combine event handling
-
-## Project Structure
-
-```
-artemis_socket_plugin/
-├── Package.swift                    # SPM manifest
-├── ArtemisSocketSDK.podspec         # CocoaPods spec
-├── Sources/ArtemisSocketSDK/
-│   ├── AgentSDK.swift               # Public facade
-│   ├── Config/                      # Configuration models & loader
-│   ├── Core/                        # Token & session managers
-│   ├── Chat/                        # Chat client
-│   ├── Events/                      # SDK & chat events
-│   ├── Models/                      # Message, WidgetConfig
-│   ├── Transport/                   # WebSocket protocol types
-│   └── Utils/                       # Logging, helpers
-├── Tests/ArtemisSocketSDKTests/     # Unit tests
-└── Example/ArtemisSocketExample/    # Demo iOS app
+```swift
+NavigationStack {
+    AgentChatUI.view(
+        configuration: configuration,
+        headerBuilder: { header in
+            AnyView(HStack {
+                Text(header.title)
+                Spacer()
+                Button("Close", action: header.onClose)
+            }.padding())
+        },
+        footerBuilder: { footer in
+            AnyView(HStack {
+                TextField(footer.placeholder, text: footer.text)
+                    .disabled(!footer.enabled)
+                Button("Send", action: footer.onSend).disabled(!footer.canSend)
+            }.padding())
+        },
+        templateRegistry: templates
+    )
+}
 ```
 
-## Connection Flow
+In a UIKit view controller, pass the same registry and builders to `show(in:)`
+inside the button action:
 
+```swift
+AgentChatUI.show(
+    in: self,
+    configuration: configuration,
+    title: "Support",
+    headerBuilder: { header in
+        AnyView(HStack {
+            Text(header.title)
+            Spacer()
+            Button("Close", action: header.onClose)
+        }.padding())
+    },
+    footerBuilder: { footer in
+        AnyView(HStack {
+            if let onAttach = footer.onAttach {
+                Button("Attach", action: onAttach).disabled(!footer.enabled)
+            }
+            TextField(footer.placeholder, text: footer.text)
+                .disabled(!footer.enabled)
+                .onSubmit(footer.onSend)
+            Button("Send", action: footer.onSend).disabled(!footer.canSend)
+        }.padding())
+    },
+    templateRegistry: templates
+)
 ```
-1. AgentSDK.connect()
-2. TokenManager → POST /api/v1/sdk/init (or /refresh)
-3. POST /api/v1/sdk/ws-ticket → WebSocket subprotocols
-4. WebSocket connect to {wssEndpoint}/ws/sdk
-5. Wait for session_start (10s timeout)
-6. Hydrate persisted history + resend pending messages
+
+The `templates` property is the `RichTemplateRegistry` created above. A matching
+`order_card` message renders the parent app's view, and its Confirm button sends
+an action through `RichTemplateContext`. `AgentChatUI.present` accepts the same
+three customization arguments.
+
+### CocoaPods
+
+Add the published pod to the host app's `Podfile`:
+
+```ruby
+pod 'ArtemisUISDK', '1.0.2'
 ```
 
-## Testing
+Then run `pod install` and open the generated `.xcworkspace`.
 
-```bash
+The bundle configuration form is also supported with `AgentChatUI.view(configuration: nil)` and `sdk_configurations.yaml`. The native UI includes connection status, reconnect, streaming/typing state, Markdown text, carousel cards from `richContent`, auto-scroll, disabled input while offline, and lifecycle cleanup.
+
+### Built-in rich templates
+
+The native SDK now parses and renders the same Flutter/Web rich-content keys from
+message metadata: `image`, `html`, `video`, `audio`, `file`, `list`, `kpi`,
+`table`, `chart`, `form`, `progress`, `feedback`, `actions`,
+`quick_replies`, channel fallback payloads, and carousel cards. Interactive
+templates call the socket SDK's `submitAction`/`submitFeedback` paths.
+
+Host apps can still pass a `RichTemplateRegistry` for custom payloads. Register
+a renderer with the same type as a built-in, for example `RichTemplateTypes.kpi`,
+to suppress the default renderer and provide an app-specific one.
+
+### UI source organization
+
+Each built-in template has its own SwiftUI `View` struct and file under
+`Sources/ArtemisUISDK/Templates/`. `RichTemplateViews.swift` selects the templates
+for a message, while `Templates/Shared/` contains reusable cards, styles, and
+formatting helpers. The default header and message composer live in
+`Components/ChatHeaderView.swift` and `Components/ChatFooterView.swift`.
+These implementation types are internal; host apps customize the UI through
+the existing header/footer builders and `RichTemplateRegistry`.
+
+## Build
+
+From this directory run:
+
+```sh
 swift test
 ```
 
-## Parity with Flutter Plugin
+## Example iOS host
 
-This native SDK ports all runtime functionality from the Flutter plugin's Dart layer:
+Open `Example/ArtemisUIExample.xcworkspace` for the native SwiftUI host after running `pod install` from `Example/`. It demonstrates the same one-button launch flow as the Flutter example, inline configuration, bundle YAML, themed chat UI, custom font injection, streaming, reconnect, Markdown, typing state, and carousel cards.
 
-| Flutter (Dart) | iOS (Swift) |
-|----------------|-------------|
-| `AgentSDK` | `AgentSDK` |
-| `SDKConfigurationLoader` | `SDKConfigurationLoader` |
-| `TokenManager` | `TokenManager` |
-| `SessionManager` | `SessionManager` |
-| `ChatClient` | `ChatClient` |
-| `Stream<SDKEvent>` | `sdkEvents` publisher + delegate |
-| `Stream<ChatEvent>` | `chatEvents` publisher + delegate |
+The example uses CocoaPods exclusively. Do not also add the SDK through Swift Package Manager to the same target, because that loads duplicate class implementations.
 
-Configuration-only features (voice, storage, analytics) are modeled but not wired into runtime, matching the Flutter plugin behavior.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+For a UIKit host, open `UIKitExample/ArtemisExample/ArtemisExample.xcodeproj` in Xcode and select the `ArtemisExample` scheme. This project uses the local Swift package. Replace the placeholder project, endpoint, API key, and channel ID in `ViewController.swift`, then run on an iOS 15+ simulator or device. The storyboard's **Connect to Artemis SDK** button calls `tapsOnConnectBtnAction(_:)`, and `SceneDelegate.swift` puts the root view controller in a navigation controller so `show(in:)` can push chat.
