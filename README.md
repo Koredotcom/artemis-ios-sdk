@@ -11,8 +11,7 @@ Add this package dependency to your app's `Package.swift`, then add the `Artemis
 ```swift
 dependencies: [
     .package(
-        url: "https://github.com/Koredotcom/artemis-ios-sdk",
-        exact: "1.0.3"
+        url: "https://github.com/Koredotcom/artemis-ios-sdk", exact: "1.0.3"
     )
 ]
 ```
@@ -37,7 +36,9 @@ final class ViewController: UIViewController {
     )
 
     @IBAction func tapsOnConnectBtnAction(_ sender: Any) {
-        AgentChatUI.show(in: self, configuration: configuration, title: "Support")
+         // Use the presentation method required by your integration.
+        //AgentChatUI.show(in: self, configuration: configuration, title: "Support")
+        AgentChatUI.present(from: self, configuration: configuration, title: "Support")
     }
 }
 ```
