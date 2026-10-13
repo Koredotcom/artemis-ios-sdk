@@ -1,6 +1,6 @@
 # Artemis Native iOS UI SDK
 
-SwiftUI implementation of the Artemis Flutter UI SDK contract.
+SwiftUI-based Artemis chat UI SDK for native iOS apps.
 
 ## Integration
 
@@ -164,7 +164,7 @@ The bundle configuration form is also supported with `AgentChatUI.view(configura
 
 ### Built-in rich templates
 
-The native SDK now parses and renders the same Flutter/Web rich-content keys from
+The native SDK parses and renders the following rich-content keys from
 message metadata: `image`, `html`, `video`, `audio`, `file`, `list`, `kpi`,
 `table`, `chart`, `form`, `progress`, `feedback`, `actions`,
 `quick_replies`, channel fallback payloads, and carousel cards. Interactive
@@ -194,7 +194,7 @@ swift test
 
 ## Example iOS host
 
-Open `Example/ArtemisUIExample.xcworkspace` for the native SwiftUI host after running `pod install` from `Example/`. It demonstrates the same one-button launch flow as the Flutter example, inline configuration, bundle YAML, themed chat UI, custom font injection, streaming, reconnect, Markdown, typing state, and carousel cards.
+Open `Example/ArtemisUIExample.xcworkspace` for the native SwiftUI host after running `pod install` from `Example/`. It demonstrates a one-button launch flow, inline configuration, bundle YAML, themed chat UI, custom font injection, streaming, reconnect, Markdown, typing state, and carousel cards.
 
 The example uses CocoaPods exclusively. Do not also add the SDK through Swift Package Manager to the same target, because that loads duplicate class implementations.
 
