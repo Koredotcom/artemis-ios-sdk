@@ -1,8 +1,9 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import Foundation
 import UniformTypeIdentifiers
+
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
 
 public struct ChatAttachment: Identifiable, Equatable, Sendable {
     public let id: String
@@ -11,7 +12,8 @@ public struct ChatAttachment: Identifiable, Equatable, Sendable {
     public let sizeBytes: Int64
     public let deliveryFailed: Bool
     public init(
-        id: String, filename: String, mimeType: String = "application/octet-stream", sizeBytes: Int64 = 0,
+        id: String, filename: String, mimeType: String = "application/octet-stream",
+        sizeBytes: Int64 = 0,
         deliveryFailed: Bool = false
     ) {
         self.id = id
@@ -40,25 +42,34 @@ public struct ChatAttachment: Identifiable, Equatable, Sendable {
         }
     }
     var detail: String {
-        fileType + (sizeBytes > 0 ? " • " + ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file) : "")
+        fileType
+            + (sizeBytes > 0
+                ? " • " + ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file) : "")
     }
     static func from(_ message: Message) -> [ChatAttachment] {
         let metadata = message.metadata?.mapValues(\.value) ?? [:]
         let custom = metadata["custom"] as? [String: Any]
         let raw =
-            metadata["attachments"] as? [[String: Any]] ?? custom?["customerAttachments"] as? [[String: Any]] ?? []
+            metadata["attachments"] as? [[String: Any]] ?? custom?["customerAttachments"]
+            as? [[String: Any]] ?? []
         let failedIDs = metadata["agentTransferAttachmentFailedIds"] as? [String] ?? []
         func failed(_ id: String) -> Bool {
-            metadata["agentTransferAttachmentDeliveryStatus"] as? String == "not_sent" || failedIDs.contains(id)
+            metadata["agentTransferAttachmentDeliveryStatus"] as? String == "not_sent"
+                || failedIDs.contains(id)
         }
         let refs = raw.compactMap { value -> ChatAttachment? in
-            guard let id = value["id"] as? String ?? value["attachmentId"] as? String, !id.isEmpty else { return nil }
+            guard let id = value["id"] as? String ?? value["attachmentId"] as? String, !id.isEmpty else {
+                return nil
+            }
             return ChatAttachment(
                 id: id,
-                filename: value["filename"] as? String ?? value["fileName"] as? String ?? value["name"] as? String
+                filename: value["filename"] as? String ?? value["fileName"] as? String ?? value["name"]
+                    as? String
                     ?? "Attachment",
-                mimeType: value["mimeType"] as? String ?? value["fileType"] as? String ?? "application/octet-stream",
-                sizeBytes: max(0, (value["sizeBytes"] as? NSNumber ?? value["size"] as? NSNumber)?.int64Value ?? 0),
+                mimeType: value["mimeType"] as? String ?? value["fileType"] as? String
+                    ?? "application/octet-stream",
+                sizeBytes: max(
+                    0, (value["sizeBytes"] as? NSNumber ?? value["size"] as? NSNumber)?.int64Value ?? 0),
                 deliveryFailed: failed(id))
         }
         var seen = Set<String>()
@@ -66,13 +77,16 @@ public struct ChatAttachment: Identifiable, Equatable, Sendable {
         let ids = metadata["attachmentIds"] as? [String] ?? message.attachmentIds ?? []
         let names = metadata["attachmentFilenames"] as? [String] ?? []
         let types = metadata["attachmentMimeTypes"] as? [String] ?? []
-        let sizes = metadata["attachmentSizeBytes"] as? [NSNumber] ?? metadata["attachmentSizes"] as? [NSNumber] ?? []
+        let sizes =
+            metadata["attachmentSizeBytes"] as? [NSNumber] ?? metadata["attachmentSizes"] as? [NSNumber]
+            ?? []
         return ids.enumerated().compactMap { i, id in
             guard !id.isEmpty, seen.insert(id).inserted else { return nil }
             return ChatAttachment(
                 id: id, filename: names.indices.contains(i) ? names[i] : "Attachment",
                 mimeType: types.indices.contains(i) ? types[i] : "application/octet-stream",
-                sizeBytes: sizes.indices.contains(i) ? max(0, sizes[i].int64Value) : 0, deliveryFailed: failed(id))
+                sizeBytes: sizes.indices.contains(i) ? max(0, sizes[i].int64Value) : 0,
+                deliveryFailed: failed(id))
         }
     }
 }
@@ -91,6 +105,15 @@ public struct AttachmentDraft: Identifiable, Sendable {
 }
 
 @MainActor extension AgentChatViewModel {
+    func updateAttachmentPolicy(_ scope: SDKSessionScope?) {
+        let allowed =
+            scope?.attachmentLimits?.enabled == true
+            && scope?.permissions.contains("attachment:write") == true
+            && !attachmentsUnavailable
+        if attachmentsAllowed && !allowed { cancelAllUploads() }
+        attachmentsAllowed = allowed
+    }
+
     var allowedAttachmentContentTypes: [UTType] {
         let values = (sdk?.configuration.attachments ?? AttachmentConfig()).allowedMimeTypes.compactMap {
             mime -> UTType? in
@@ -118,14 +141,15 @@ public struct AttachmentDraft: Identifiable, Sendable {
         var seen = Set(attachmentDrafts.map { $0.source.standardizedFileURL })
         let additions = urls.filter { seen.insert($0.standardizedFileURL).inserted }
         guard additions.count + attachmentDrafts.count <= AttachmentConfig.maxFilesPerMessage else {
-            errorMessage = "You can attach up to five files per message."
+            errorMessage = strings("You can attach up to five files per message.")
             if removeTemporaryFiles { urls.forEach(Self.removePickerFile) }
             return
         }
         attachmentSessionId = sessionId
         attachmentDrafts += additions.map { url in
             AttachmentDraft(
-                id: UUID().uuidString, attachment: ChatAttachment(id: "", filename: url.lastPathComponent), source: url,
+                id: UUID().uuidString, attachment: ChatAttachment(id: "", filename: url.lastPathComponent),
+                source: url,
                 sessionId: sessionId, removesSource: removeTemporaryFiles)
         }
         publishAttachments()
@@ -157,7 +181,9 @@ public struct AttachmentDraft: Identifiable, Sendable {
         startNextUpload()
     }
     public func removeAttachment(_ id: String) {
-        guard !isSending, let draft = attachmentDrafts.first(where: { $0.id == id || $0.attachment.id == id }) else {
+        guard !isSending,
+            let draft = attachmentDrafts.first(where: { $0.id == id || $0.attachment.id == id })
+        else {
             return
         }
         if draft.status == .uploading {
@@ -172,7 +198,8 @@ public struct AttachmentDraft: Identifiable, Sendable {
     func cancelAllUploads() {
         uploadTask?.cancel()
         uploadTask = nil
-        for i in attachmentDrafts.indices where [.queued, .uploading].contains(attachmentDrafts[i].status) {
+        for i in attachmentDrafts.indices
+        where [.queued, .uploading].contains(attachmentDrafts[i].status) {
             attachmentDrafts[i].revision += 1
             attachmentDrafts[i].status = .cancelled
         }
@@ -210,9 +237,12 @@ public struct AttachmentDraft: Identifiable, Sendable {
                     let values = try draft.source.resourceValues(forKeys: [
                         .fileSizeKey, .contentTypeKey, .isRegularFileKey,
                     ])
-                    guard values.isRegularFile == true else { throw AttachmentError("Select a file, not a folder") }
+                    guard values.isRegularFile == true else {
+                        throw AttachmentError("Select a file, not a folder")
+                    }
                     let mime =
-                        UTType(filenameExtension: draft.source.pathExtension)?.preferredMIMEType ?? values.contentType?
+                        UTType(filenameExtension: draft.source.pathExtension)?.preferredMIMEType ?? values
+                        .contentType?
                         .preferredMIMEType ?? "application/octet-stream"
                     let size = Int64(values.fileSize ?? 0)
                     guard policy.accepts(mimeType: mime, sizeBytes: size) else {
@@ -267,14 +297,15 @@ public struct AttachmentDraft: Identifiable, Sendable {
     public func attachmentDownloadURL(_ attachment: ChatAttachment) async -> URL? {
         guard !attachment.deliveryFailed, let sdk else { return nil }
         do { return try await sdk.resolveAttachmentDownloadURL(attachmentId: attachment.id) } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = strings(error.localizedDescription)
             return nil
         }
     }
     private static func removePickerFile(_ url: URL) {
         let folder = url.deletingLastPathComponent()
         guard
-            folder.lastPathComponent.hasPrefix("ArtemisPhoto-") || folder.lastPathComponent.hasPrefix("ArtemisCamera-"),
+            folder.lastPathComponent.hasPrefix("ArtemisPhoto-")
+                || folder.lastPathComponent.hasPrefix("ArtemisCamera-"),
             folder.deletingLastPathComponent().standardizedFileURL
                 == FileManager.default.temporaryDirectory.standardizedFileURL
         else { return }

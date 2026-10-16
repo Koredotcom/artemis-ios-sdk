@@ -26,7 +26,8 @@ struct ContentView: View {
     private let configuration = SDKConfiguration(
         environment: "dev",
         connection: ConnectionConfig(projectId: "01a11b2b-ff52-7a5f-8fbb-bc1b92b40f68", endpoint: "https://agents-dev.kore.ai", apiKey: "pk_3e9df959d0592ba2c58809a8e0f10ba4d1ca6a09c0340f05"),
-        channel: ChannelConfig(channelId: "01a11b3b-9013-7be1-b4e1-e9b16c29d5e5")
+        channel: ChannelConfig(channelId: "01a11b3b-9013-7be1-b4e1-e9b16c29d5e5"),
+        //features: FeaturesConfig(enableAttachments: true)
     )
     var body: some View {
         NavigationView {

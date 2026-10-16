@@ -1,10 +1,14 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import Foundation
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 struct CarouselRichTemplate: View {
+    @Environment(\.chatStrings) private var strings
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
     let carousel: CarouselTemplate
     let accentColor: Color
     let submitAction: (String, String?, [String: String]?, String?) -> Void
@@ -24,7 +28,7 @@ struct CarouselRichTemplate: View {
                             TemplateRemoteImage(url: url) { loaded in
                                 loaded.resizable().scaledToFill()
                             } placeholder: {
-                                TemplateStyle.placeholder
+                                templateStyle.placeholder
                             }
                             .frame(width: 220, height: 130)
                             .clipped()
@@ -55,7 +59,7 @@ struct CarouselRichTemplate: View {
                                                     submitAction(button.id, button.value ?? button.label, nil, renderId)
                                                 }
                                                 selected = button.id
-                                            } catch { self.error = "Action could not be sent. Please retry." }
+                                            } catch { self.error = strings("Action could not be sent. Please retry.") }
                                         }
                                     }
                                 }

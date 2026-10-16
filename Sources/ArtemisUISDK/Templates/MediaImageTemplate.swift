@@ -1,10 +1,13 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import Foundation
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 struct MediaImageTemplate: View {
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
     let image: MediaContent
     let accentColor: Color
 
@@ -18,7 +21,7 @@ struct MediaImageTemplate: View {
                         PlaceholderIcon(systemImage: "photo", accentColor: accentColor)
                     }
                     .frame(maxWidth: .infinity, minHeight: 170, maxHeight: 230)
-                    .clipShape(RoundedRectangle(cornerRadius: TemplateStyle.imageRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: templateStyle.imageRadius))
                 }
             }
             if let caption = image.caption ?? image.alt, !caption.templateTrimmed.isEmpty {

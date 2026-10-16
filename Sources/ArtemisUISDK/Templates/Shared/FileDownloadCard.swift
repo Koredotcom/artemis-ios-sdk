@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct FileDownloadCard: View {
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+    @Environment(\.chatStrings) private var strings
     let title: String
     let subtitle: String
     let url: String
@@ -19,7 +22,7 @@ struct FileDownloadCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(TemplateStyle.text)
+                    .foregroundStyle(templateStyle.text)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 if !subtitle.templateTrimmed.isEmpty {
@@ -28,7 +31,7 @@ struct FileDownloadCard: View {
             }
             .layoutPriority(1)
             Spacer(minLength: 12)
-            Text("Download")
+            Text(strings("Download"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(accentColor)
                 .lineLimit(1)

@@ -1,15 +1,16 @@
-// Host apps need the socket module's initializers even with MemberImportVisibility enabled.
-// Public aliases alone expose the type names but not their members.
-#if canImport(ArtemisSocketSDK)
-@_exported import ArtemisSocketSDK
-public typealias SDKConfiguration = ArtemisSocketSDK.SDKConfiguration
-public typealias ConnectionConfig = ArtemisSocketSDK.ConnectionConfig
-public typealias ChannelConfig = ArtemisSocketSDK.ChannelConfig
-public typealias Message = ArtemisSocketSDK.Message
-#endif
 import Combine
 import Foundation
 import SwiftUI
+
+// Host apps need the socket module's initializers even with MemberImportVisibility enabled.
+// Public aliases alone expose the type names but not their members.
+#if canImport(ArtemisSocketSDK)
+    @_exported import ArtemisSocketSDK
+    public typealias SDKConfiguration = ArtemisSocketSDK.SDKConfiguration
+    public typealias ConnectionConfig = ArtemisSocketSDK.ConnectionConfig
+    public typealias ChannelConfig = ArtemisSocketSDK.ChannelConfig
+    public typealias Message = ArtemisSocketSDK.Message
+#endif
 #if canImport(UIKit)
     import UIKit
 #endif
@@ -22,7 +23,8 @@ public struct ChatHeaderContext {
     public let statusText: String
     public let canMinimize: Bool
     public init(
-        title: String, theme: ChatTheme?, onMinimize: @escaping () -> Void, onClose: @escaping () -> Void,
+        title: String, theme: ChatTheme?, onMinimize: @escaping () -> Void,
+        onClose: @escaping () -> Void,
         statusText: String = "", canMinimize: Bool = false
     ) {
         self.title = title
@@ -46,7 +48,8 @@ public struct ChatFooterContext {
     public let isUploading: Bool
     public let pendingAttachments: [ChatAttachment]
     public init(
-        text: Binding<String>, enabled: Bool, placeholder: String, theme: ChatTheme?, onSend: @escaping () -> Void,
+        text: Binding<String>, enabled: Bool, placeholder: String, theme: ChatTheme?,
+        onSend: @escaping () -> Void,
         onAttach: (() -> Void)? = nil, canSend: Bool? = nil, isUploading: Bool = false,
         pendingAttachments: [ChatAttachment] = []
     ) {
@@ -57,7 +60,8 @@ public struct ChatFooterContext {
         self.onSend = onSend
         self.onAttach = onAttach
         self.canSend =
-            canSend ?? (enabled && !text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            canSend
+            ?? (enabled && !text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         self.isUploading = isUploading
         self.pendingAttachments = pendingAttachments
     }
@@ -87,17 +91,20 @@ public struct RichTemplateContext {
     public let theme: ChatTheme?
     public let accentColor: Color
     public let submitAction:
-        (_ actionId: String, _ value: String?, _ formData: [String: String]?, _ renderId: String?) -> Void
+        (_ actionId: String, _ value: String?, _ formData: [String: String]?, _ renderId: String?) ->
+            Void
     public let performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)?
     public let sendFeedback: ((String, String, Int, String?) async throws -> Void)?
     public let presentation: ChatPresentationState?
     public let submitFeedback:
-        (_ messageId: String, _ ratingType: String, _ ratingValue: Int, _ actionRenderId: String?) -> Void
+        (_ messageId: String, _ ratingType: String, _ ratingValue: Int, _ actionRenderId: String?) ->
+            Void
     public init(
         message: Message, theme: ChatTheme?, accentColor: Color,
         submitAction: @escaping (String, String?, [String: String]?, String?) -> Void,
         submitFeedback: @escaping (String, String, Int, String?) -> Void = { _, _, _, _ in },
-        performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)? = nil,
+        performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)? =
+            nil,
         sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil,
         presentation: ChatPresentationState? = nil
     ) {
@@ -169,10 +176,42 @@ public struct ChatTheme: Sendable {
     public let borderColor: String
     public let borderRadius: Double
 
+    public let fontFamily: String
+    public let baseFontSize: Double
+    public let density: String
+    public let messageBubbleRadius: Double
+    public let backgroundImageURL: URL?
+    public var spacingScale: CGFloat { density == "compact" ? 0.85 : density == "spacious" ? 1.2 : 1 }
+    public func font(size: CGFloat? = nil, weight: Font.Weight = .regular) -> Font {
+        let resolved = size.map { $0 * CGFloat(baseFontSize / 16) } ?? CGFloat(baseFontSize)
+        return fontFamily == "System"
+            ? .system(size: resolved, weight: weight) : .custom(fontFamily, size: resolved).weight(weight)
+    }
     public let darkMode: Bool
-    public init(configuration: SDKConfiguration, widgetConfig: WidgetConfig? = nil, systemDarkMode: Bool = false) {
+    public let timestamps: MessageTimestampSettings
+    public init(
+        configuration: SDKConfiguration, widgetConfig: WidgetConfig? = nil, systemDarkMode: Bool = false
+    ) {
         let base = configuration.theme
         let server = widgetConfig?.theme
+        let raw = server?.raw.mapValues(\.value) ?? [:]
+        let baseRadius = base.borderRadius.isFinite ? min(48, max(0, base.borderRadius)) : 16
+        fontFamily = raw["fontFamily"] as? String ?? base.fontFamily
+        let size = (raw["baseFontSize"] as? NSNumber)?.doubleValue ?? Double(server?.baseFontSize ?? 16)
+        baseFontSize = size.isFinite ? min(32, max(12, size)) : 16
+        density =
+            ["compact", "comfortable", "spacious"].contains(server?.density ?? "")
+            ? server!.density! : "comfortable"
+        let radii: [String: Double] = ["xs": 4, "s": 8, "m": 12, "l": 16, "xl": 24]
+        let radius =
+            (raw["messageBubbleRadius"] as? NSNumber)?.doubleValue
+            ?? radii[raw["messageBubbleRadius"] as? String ?? ""]
+            ?? Double(server?.borderRadius ?? Int(baseRadius))
+        messageBubbleRadius = radius.isFinite ? min(48, max(0, radius)) : 16
+        backgroundImageURL = server?.backgroundImage.flatMap(URL.init(string:)).flatMap {
+            $0.isHTTP ? $0 : nil
+        }
+        timestamps = MessageTimestampSettings(runtime: server?.raw.mapValues(\.value) ?? [:])
         let dark = server?.darkMode ?? (base.darkMode || systemDarkMode)
         darkMode = dark
         func pick(_ serverValue: String?, _ fallback: String) -> String {
@@ -183,12 +222,14 @@ public struct ChatTheme: Sendable {
         }
         primaryColor = pick(server?.primaryColor, base.primaryColor)
         backgroundColor = pick(
-            server?.backgroundColor, adaptive(base.backgroundColor, lightDefaults: ["#FFFFFF"], darkValue: "#0F172A"))
+            server?.backgroundColor,
+            adaptive(base.backgroundColor, lightDefaults: ["#FFFFFF"], darkValue: "#0F172A"))
         surfaceColor = pick(
             server?.surfaceColor,
             adaptive(base.surfaceColor, lightDefaults: ["#F5F5F5", "#F8FAFC"], darkValue: "#1E293B"))
         textColor = pick(
-            server?.textColor, adaptive(base.textColor, lightDefaults: ["#1A1A1A", "#1E293B"], darkValue: "#E2E8F0"))
+            server?.textColor,
+            adaptive(base.textColor, lightDefaults: ["#1A1A1A", "#1E293B"], darkValue: "#E2E8F0"))
         mutedTextColor = pick(server?.textMutedColor, dark ? "#94A3B8" : "#64748B")
         headerBackgroundColor = pick(server?.headerBackgroundColor, primaryColor)
         headerTextColor = pick(server?.headerTextColor, "#FFFFFF")
@@ -196,9 +237,10 @@ public struct ChatTheme: Sendable {
         userBubbleTextColor = pick(server?.userBubbleTextColor, "#FFFFFF")
         assistantBubbleColor = pick(server?.assistantBubbleColor, dark ? surfaceColor : "#F1F5F9")
         assistantBubbleTextColor = pick(server?.assistantBubbleTextColor, textColor)
-        composeBarBackgroundColor = pick(server?.composeBarBackgroundColor, dark ? "#1E293B" : "#FFFFFF")
+        composeBarBackgroundColor = pick(
+            server?.composeBarBackgroundColor, dark ? "#1E293B" : "#FFFFFF")
         borderColor = pick(server?.borderColor, dark ? "#334155" : "#E2E8F0")
-        borderRadius = Double(server?.borderRadius ?? Int(base.borderRadius))
+        borderRadius = min(48, max(0, Double(server?.borderRadius ?? Int(baseRadius))))
 
     }
 }
@@ -211,37 +253,39 @@ public struct UIConfigurationError: Error, LocalizedError, Sendable {
 }
 
 #if canImport(ArtemisSocketSDK)
-public enum SDKConfigurationLoader {
-    public static func createDefault(
-        projectId: String, endpoint: String, apiKey: String? = nil,
-        bootstrapToken: String? = nil, channelId: String? = nil,
-        channelName: String? = nil
-    ) throws -> SDKConfiguration {
-        guard !projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw UIConfigurationError("projectId is required")
+    public enum SDKConfigurationLoader {
+        public static func createDefault(
+            projectId: String, endpoint: String, apiKey: String? = nil,
+            bootstrapToken: String? = nil, channelId: String? = nil,
+            channelName: String? = nil
+        ) throws -> SDKConfiguration {
+            guard !projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw UIConfigurationError("projectId is required")
+            }
+            guard let url = URL(string: endpoint), ["http", "https"].contains(url.scheme?.lowercased())
+            else {
+                throw UIConfigurationError("endpoint must be an HTTP(S) URL")
+            }
+            guard (apiKey != nil) != (bootstrapToken != nil) else {
+                throw UIConfigurationError("Provide exactly one of apiKey or bootstrapToken")
+            }
+            return SDKConfiguration(
+                environment: "dev",
+                connection: ConnectionConfig(
+                    projectId: projectId, endpoint: endpoint, apiKey: apiKey, bootstrapToken: bootstrapToken),
+                channel: ChannelConfig(channelId: channelId, channelName: channelName))
         }
-        guard let url = URL(string: endpoint), ["http", "https"].contains(url.scheme?.lowercased()) else {
-            throw UIConfigurationError("endpoint must be an HTTP(S) URL")
+        @MainActor public static func load(
+            fromBundle bundle: Bundle = .main, resourceName: String = "sdk_configurations",
+            environment: String? = nil,
+            runtimeUserContext: SDKUserContext? = nil
+        ) throws -> SDKConfiguration {
+            try AgentSDK.initialize(
+                fromBundle: bundle, resourceName: resourceName, environment: environment,
+                runtimeUserContext: runtimeUserContext
+            ).configuration
         }
-        guard (apiKey != nil) != (bootstrapToken != nil) else {
-            throw UIConfigurationError("Provide exactly one of apiKey or bootstrapToken")
-        }
-        return SDKConfiguration(
-            environment: "dev",
-            connection: ConnectionConfig(
-                projectId: projectId, endpoint: endpoint, apiKey: apiKey, bootstrapToken: bootstrapToken),
-            channel: ChannelConfig(channelId: channelId, channelName: channelName))
     }
-    @MainActor public static func load(
-        fromBundle bundle: Bundle = .main, resourceName: String = "sdk_configurations", environment: String? = nil,
-        runtimeUserContext: SDKUserContext? = nil
-    ) throws -> SDKConfiguration {
-        try AgentSDK.initialize(
-            fromBundle: bundle, resourceName: resourceName, environment: environment,
-            runtimeUserContext: runtimeUserContext
-        ).configuration
-    }
-}
 #endif
 
 public enum AgentChatUI {
@@ -250,12 +294,15 @@ public enum AgentChatUI {
         environment: String? = nil, configResource: String = "sdk_configurations",
         runtimeUserContext: SDKUserContext? = nil, headerBuilder: ChatHeaderBuilder? = nil,
         footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
+        uiOptions: ChatUIOptions? = nil,
         onClose: (() -> Void)? = nil
     ) -> AgentChatView {
         AgentChatView(
             configuration: configuration, title: title, fonts: fonts, environment: environment,
-            configResource: configResource, runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
-            footerBuilder: footerBuilder, templateRegistry: templateRegistry, onClose: onClose)
+            configResource: configResource, runtimeUserContext: runtimeUserContext,
+            headerBuilder: headerBuilder,
+            footerBuilder: footerBuilder, templateRegistry: templateRegistry, uiOptions: uiOptions,
+            onClose: onClose)
     }
 
     #if canImport(UIKit)
@@ -267,10 +314,12 @@ public enum AgentChatUI {
             title: String = "Chat", fonts: ChatFonts? = nil, environment: String? = nil,
             configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-            templateRegistry: RichTemplateRegistry? = nil,
+            templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
             hidesBottomBarWhenPushed: Bool = true, animated: Bool = true
         ) -> Bool {
-            guard let navigationController = (controller as? UINavigationController) ?? controller.navigationController,
+            guard
+                let navigationController = (controller as? UINavigationController)
+                    ?? controller.navigationController,
                 let source = navigationController.topViewController,
                 !(source is ChatNavigationHostingController<AgentChatView>)
             else { return false }
@@ -278,7 +327,8 @@ public enum AgentChatUI {
             let chat = view(
                 configuration: configuration, title: title, fonts: fonts, environment: environment,
                 configResource: configResource, runtimeUserContext: runtimeUserContext,
-                headerBuilder: headerBuilder, footerBuilder: footerBuilder, templateRegistry: templateRegistry
+                headerBuilder: headerBuilder, footerBuilder: footerBuilder,
+                templateRegistry: templateRegistry, uiOptions: uiOptions
             ) { [weak navigationController, weak source] in
                 guard let navigationController, let source,
                     navigationController.topViewController is ChatNavigationHostingController<AgentChatView>,
@@ -298,12 +348,13 @@ public enum AgentChatUI {
             title: String = "Chat", fonts: ChatFonts? = nil, environment: String? = nil,
             configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-            templateRegistry: RichTemplateRegistry? = nil
+            templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil
         ) {
             let chat = view(
                 configuration: configuration, title: title, fonts: fonts, environment: environment,
-                configResource: configResource, runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
-                footerBuilder: footerBuilder, templateRegistry: templateRegistry
+                configResource: configResource, runtimeUserContext: runtimeUserContext,
+                headerBuilder: headerBuilder,
+                footerBuilder: footerBuilder, templateRegistry: templateRegistry, uiOptions: uiOptions
             ) { [weak controller] in
                 controller?.dismiss(animated: true)
             }
@@ -326,6 +377,17 @@ public enum AgentChatUI {
     @Published private(set) var scrollToBottomRequest = 0
     @Published private(set) var forceScrollRequest = 0
     @Published public private(set) var theme: ChatTheme?
+    @Published public private(set) var strings = ChatStrings()
+    private var stringOverrides: ChatStrings?
+    public func configureStrings(_ overrides: ChatStrings?) {
+        stringOverrides = overrides
+        let localization = sdk?.configuration.localization ?? configuration?.localization
+        strings =
+            overrides
+            ?? ChatStrings(
+                localeIdentifier: localization?.defaultLocale ?? Locale.current.identifier,
+                fallbackLocaleIdentifier: localization?.fallbackLocale ?? "en")
+    }
     @Published public var errorMessage: String?
     @Published public var composeText = ""
     @Published public internal(set) var pendingAttachments: [ChatAttachment] = []
@@ -354,18 +416,36 @@ public enum AgentChatUI {
         systemDarkMode = isDark
         updatePolicy()
     }
-    public var placeholder: String { sdk?.getWidgetConfig()?.placeholderText ?? "Type a message..." }
+    public var placeholder: String {
+        sdk?.getWidgetConfig()?.placeholderText ?? strings("Type a message...")
+    }
     public var statusText: String {
-        if status == .connecting { return sdk?.getWidgetConfig()?.connectingStatusText ?? "Connecting…" }
-        if status != .connected { return "Disconnected" }
+        if status == .connecting {
+            return sdk?.getWidgetConfig()?.connectingStatusText ?? strings("Connecting…")
+        }
+        if status != .connected { return strings("Disconnected") }
         switch transferStatus {
-        case .queued: return "Waiting for a human agent…"
-        case .connected: return "Connected to a human agent"
-        default: return "Connected"
+        case .queued: return strings("Waiting for a human agent…")
+        case .connected: return strings("Connected to a human agent")
+        default: return strings("Connected")
         }
     }
     public var contactCenterEnabled: Bool {
-        sdk?.configuration.features.enableContactCenter ?? configuration?.features.enableContactCenter ?? false
+        sdk?.configuration.features.enableContactCenter ?? configuration?.features.enableContactCenter
+            ?? false
+    }
+    public var thoughtsEnabled: Bool {
+        guard let sdk, sdk.configuration.chat.enableThoughts, sdk.configuration.features.enableActivityUpdates,
+            let scope = sdk.getSessionScope(), scope.showActivityUpdates
+        else { return false }
+        return scope.activityVisibilityPolicy["enabled"]?.value as? Bool != false
+            && scope.activityVisibilityPolicy["thoughtSummaries"]?.value as? Bool == true
+    }
+    public var thoughtToolNamesVisible: Bool {
+        sdk?.getSessionScope()?.activityVisibilityPolicy["exposeToolNames"]?.value as? Bool == true
+    }
+    public var feedbackEnabled: Bool {
+        sdk?.configuration.features.enableFeedback ?? configuration?.features.enableFeedback ?? true
     }
     public var citationsEnabled: Bool {
         sdk?.configuration.features.enableCitations ?? configuration?.features.enableCitations ?? true
@@ -398,13 +478,15 @@ public enum AgentChatUI {
                     runtimeUserContext: runtimeUserContext)
             }
             sdk = created
-            theme = ChatTheme(configuration: created.configuration, widgetConfig: created.getWidgetConfig())
+            configureStrings(stringOverrides)
+            theme = ChatTheme(
+                configuration: created.configuration, widgetConfig: created.getWidgetConfig())
             sdkCancellable = created.sdkEvents.sink { [weak self] event in self?.handle(event) }
             chatCancellable = created.chatEvents.sink { [weak self] event in self?.handle(event) }
             connect(created)
         } catch {
             status = .notConnected
-            errorMessage = error.localizedDescription
+            errorMessage = strings(error.localizedDescription)
         }
     }
     private func connect(_ sdk: AgentSDK) {
@@ -420,7 +502,7 @@ public enum AgentChatUI {
             } catch {
                 guard self.sdk === sdk else { return }
                 self.status = .notConnected
-                self.errorMessage = error.localizedDescription
+                self.errorMessage = strings(error.localizedDescription)
             }
         }
     }
@@ -434,7 +516,7 @@ public enum AgentChatUI {
         let attachments = pendingAttachments
         guard attachments.isEmpty || attachmentSessionId == sdk.getSessionId() else {
             resetAttachments()
-            errorMessage = "The conversation changed. Please attach the files again."
+            errorMessage = strings("The conversation changed. Please attach the files again.")
             return
         }
         isSending = true
@@ -448,19 +530,21 @@ public enum AgentChatUI {
                     attachments.isEmpty
                     ? nil
                     : [
-                        "attachmentIds": attachments.map(\.id), "attachmentFilenames": attachments.map(\.filename),
+                        "attachmentIds": attachments.map(\.id),
+                        "attachmentFilenames": attachments.map(\.filename),
                         "attachmentMimeTypes": attachments.map(\.mimeType),
                         "attachmentSizeBytes": attachments.map(\.sizeBytes),
                     ]
                 let id = try await sdk.sendMessage(
-                    text, metadata: metadata, attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id))
+                    text, metadata: metadata, attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id)
+                )
                 guard self.sdk === sdk else { return }
                 self.sentAttachments[id] = attachments
                 self.composeText = ""
                 self.resetAttachments()
                 self.messages = sdk.getMessages()
                 try? sdk.sendUserPresence(isTyping: false)
-            } catch { self.errorMessage = error.localizedDescription }
+            } catch { self.errorMessage = strings(error.localizedDescription) }
         }
     }
     public func composerChanged() {
@@ -473,16 +557,21 @@ public enum AgentChatUI {
         }
     }
     public func submitAction(
-        _ actionId: String, value: String? = nil, formData: [String: String]? = nil, renderId: String? = nil
+        _ actionId: String, value: String? = nil, formData: [String: String]? = nil,
+        renderId: String? = nil
     ) {
         Task { [weak self] in
-            do { try await self?.performAction(actionId, value: value, formData: formData, renderId: renderId) } catch {
-                self?.errorMessage = error.localizedDescription
+            do {
+                try await self?.performAction(
+                    actionId, value: value, formData: formData, renderId: renderId)
+            } catch {
+                self?.errorMessage = self?.strings(error.localizedDescription) ?? error.localizedDescription
             }
         }
     }
     public func performAction(
-        _ actionId: String, value: String? = nil, formData: [String: String]? = nil, renderId: String? = nil,
+        _ actionId: String, value: String? = nil, formData: [String: String]? = nil,
+        renderId: String? = nil,
         displayText: String? = nil
     ) async throws {
         guard let sdk else { throw AgentSDKError.notConnected }
@@ -491,21 +580,31 @@ public enum AgentChatUI {
         messages = sdk.getMessages()
         scrollToBottomRequest &+= 1
     }
-    public func submitFeedback(_ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String? = nil)
-    {
+    public func submitFeedback(
+        _ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String? = nil
+    ) {
         Task { [weak self] in
             do {
                 try await self?.sendFeedback(
-                    messageId, ratingType: ratingType, ratingValue: ratingValue, actionRenderId: actionRenderId)
-            } catch { self?.errorMessage = error.localizedDescription }
+                    messageId, ratingType: ratingType, ratingValue: ratingValue,
+                    actionRenderId: actionRenderId)
+            } catch { self?.errorMessage = self?.strings(error.localizedDescription) ?? error.localizedDescription }
         }
     }
-    public func sendFeedback(_ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String?)
+    public func sendMessageFeedback(_ messageId: String, rating: Int, comment: String?) async throws {
+        guard let sdk else { throw AgentSDKError.notConnected }
+        _ = try await sdk.submitFeedback(
+            messageId: messageId, ratingType: "thumbs", ratingValue: rating, feedbackText: comment)
+    }
+    public func sendFeedback(
+        _ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String?
+    )
         async throws
     {
         guard let sdk else { throw AgentSDKError.notConnected }
         _ = try await sdk.submitFeedback(
-            messageId: messageId, ratingType: ratingType, ratingValue: ratingValue, actionRenderId: actionRenderId)
+            messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
+            actionRenderId: actionRenderId)
     }
     func surveyPresentation(for message: Message) -> SurveyPresentation {
         if let existing = surveys[message.id] { return existing }
@@ -515,7 +614,9 @@ public enum AgentChatUI {
         return state
     }
     func submitSurvey(_ survey: AgentTransferSurvey, state: SurveyPresentation) {
-        guard let score = state.score, state.status != .pending, state.status != .submitted else { return }
+        guard let score = state.score, state.status != .pending, state.status != .submitted else {
+            return
+        }
         state.status = .pending
         let session = sdk?.getSessionId()
         Task { [weak self, weak state] in
@@ -568,14 +669,9 @@ public enum AgentChatUI {
     private func updatePolicy() {
         guard let sdk else { return }
         theme = ChatTheme(
-            configuration: sdk.configuration, widgetConfig: sdk.getWidgetConfig(), systemDarkMode: systemDarkMode)
-        let allowed =
-            sdk.configuration.features.enableAttachments && sdk.configuration.chat.enableFileUpload
-            && sdk.configuration.features.enableFileUpload
-            && sdk.getWidgetConfig()?.theme?.attachmentButtonEnabled == true
-            && sdk.getSessionScope()?.permissions.contains("attachment:write") == true && !attachmentsUnavailable
-        if attachmentsAllowed && !allowed { cancelAllUploads() }
-        attachmentsAllowed = allowed
+            configuration: sdk.configuration, widgetConfig: sdk.getWidgetConfig(),
+            systemDarkMode: systemDarkMode)
+        updateAttachmentPolicy(sdk.getSessionScope())
     }
     private func handle(_ event: SDKEvent) {
         switch event {
@@ -600,7 +696,7 @@ public enum AgentChatUI {
             isTyping = false
             cancelAllUploads()
         case .error(let error, let code):
-            if code != .historyFetch { errorMessage = error.localizedDescription }
+            if code != .historyFetch { errorMessage = strings(error.localizedDescription) }
             if sdk?.isConnected() != true { status = .notConnected }
         default: break
         }
@@ -624,7 +720,7 @@ public enum AgentChatUI {
             activityText = nil
         case .error(let error):
             isTyping = false
-            errorMessage = error.localizedDescription
+            errorMessage = strings(error.localizedDescription)
         default: break
         }
     }
@@ -632,13 +728,26 @@ public enum AgentChatUI {
 
 @MainActor public final class ChatPresentationState {
     private var forms: [String: [String: String]] = [:]
+    private var feedbackStates: [String: MessageFeedbackState] = [:]
+    func feedback(for id: String) -> MessageFeedbackState {
+        if let state = feedbackStates[id] { return state }
+        let state = MessageFeedbackState()
+        if feedbackStates.count >= 500, let first = feedbackStates.keys.first {
+            feedbackStates.removeValue(forKey: first)
+        }
+        feedbackStates[id] = state
+        return state
+    }
     public init() {}
     func values(for id: String) -> [String: String] { forms[id] ?? [:] }
     func save(_ values: [String: String], for id: String) {
         forms[id] = values
         if forms.count > 500, let first = forms.keys.first { forms.removeValue(forKey: first) }
     }
-    func clear() { forms.removeAll() }
+    func clear() {
+        forms.removeAll()
+        feedbackStates.removeAll()
+    }
 }
 
 @MainActor final class SurveyPresentation: ObservableObject {
@@ -652,9 +761,11 @@ extension SDKConfiguration {
     fileprivate func copyForUI(context: SDKUserContext) -> SDKConfiguration {
         SDKConfiguration(
             environment: environment, connection: connection, channel: channel,
-            userContext: UserContextConfig(userId: context.userId, customAttributes: context.customAttributes),
+            userContext: UserContextConfig(
+                userId: context.userId, customAttributes: context.customAttributes),
             websocket: websocket, voice: voice, chat: chat, storage: storage, performance: performance,
-            accessibility: accessibility, theme: theme, debug: debug, features: features, localization: localization,
+            accessibility: accessibility, theme: theme, debug: debug, features: features,
+            localization: localization,
             security: security, analytics: analytics, session: session, attachments: attachments)
     }
 }

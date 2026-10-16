@@ -1,28 +1,33 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import Foundation
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 struct RichContentTemplatesView: View {
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
     let message: Message
     let context: RichTemplateContext
     var suppressedTypes: Set<String> = []
+    var fillsAvailableWidth = true
 
     private var richContent: RichContent? { message.richContent }
     private var actions: ActionSet? { message.actions }
 
     var body: some View {
-        if richContent != nil || actions != nil {
-            VStack(alignment: .leading, spacing: TemplateStyle.sectionSpacing) {
-                if !isSuppressed("markdown"), let markdown = richContent?.markdown {
-                    Text(ChatMarkdownCache.text(markdown)).textSelection(.enabled)
+        if richContent != nil || (actions != nil && !isSuppressed(RichTemplateTypes.actions)) {
+            VStack(alignment: .leading, spacing: templateStyle.sectionSpacing) {
+                if !isSuppressed("markdown"), let markdown = richContent?.markdown, !markdown.templateTrimmed.isEmpty {
+                    ChatMarkdownView(content: markdown, fillsAvailableWidth: fillsAvailableWidth)
+                } else if !isSuppressed(RichTemplateTypes.html), let html = richContent?.html?.templateTrimmed,
+                    !html.isEmpty
+                {
+                    HTMLRichTemplate(content: html, accentColor: context.accentColor)
                 }
                 if !isSuppressed(RichTemplateTypes.image), let image = richContent?.image {
                     MediaImageTemplate(image: image, accentColor: context.accentColor)
-                }
-                if !isSuppressed(RichTemplateTypes.html), let html = richContent?.html?.templateTrimmed, !html.isEmpty {
-                    HTMLRichTemplate(content: html, accentColor: context.accentColor)
                 }
                 if !isSuppressed(RichTemplateTypes.video), let video = richContent?.video {
                     VideoRichTemplate(media: video, accentColor: context.accentColor)
@@ -60,16 +65,23 @@ struct RichContentTemplatesView: View {
                 if !isSuppressed(RichTemplateTypes.quickReplies), let replies = richContent?.quickReplies {
                     QuickRepliesTemplate(replies: replies, messageId: message.id, context: context)
                 }
-                if !isSuppressed(RichTemplateTypes.channelFallback) {
-                    ForEach(richContent?.channelFallbackItems ?? []) { item in ChannelFallbackTemplate(item: item) }
+                if !isSuppressed(RichTemplateTypes.channelFallback),
+                    let items = richContent?.channelFallbackItems, !items.isEmpty
+                {
+                    VStack(alignment: .leading, spacing: 8 * (chatTheme?.spacingScale ?? 1)) {
+                        ForEach(items) { item in
+                            ChannelFallbackTemplate(item: item)
+                        }
+                    }
                 }
                 if !isSuppressed("carousel"), let carousel = richContent?.carousel {
                     CarouselRichTemplate(
-                        carousel: carousel, accentColor: context.accentColor, submitAction: context.submitAction,
+                        carousel: carousel, accentColor: context.accentColor,
+                        submitAction: context.submitAction,
                         renderId: message.id, context: context)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
         }
     }
 

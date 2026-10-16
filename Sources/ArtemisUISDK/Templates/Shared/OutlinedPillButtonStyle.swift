@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OutlinedPillButtonStyle: ButtonStyle {
+    @Environment(\.chatTheme) private var theme
     let accentColor: Color
     var isSelected = false
 
@@ -13,7 +14,10 @@ struct OutlinedPillButtonStyle: ButtonStyle {
             .padding(.horizontal, 16)
             .frame(minHeight: 42)
             .frame(maxWidth: .infinity)
-            .background((isSelected ? accentColor.opacity(0.18) : Color.clear).opacity(configuration.isPressed ? 0.8 : 1))
+            .background(
+                (isSelected ? accentColor.opacity(0.18) : Color.clear).opacity(
+                    configuration.isPressed ? 0.8 : 1)
+            )
             .overlay(Capsule().stroke(accentColor, lineWidth: 1.5))
             .clipShape(Capsule())
             .opacity(configuration.isPressed ? 0.75 : 1)

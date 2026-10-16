@@ -33,31 +33,40 @@ extension AgentChatUI {
         configuration: SDKConfiguration? = nil, environment: String? = nil,
         runtimeUserContext: SDKUserContext? = nil
     ) -> AgentChatHandle {
-        AgentChatHandle(configuration: configuration, environment: environment, runtimeUserContext: runtimeUserContext)
+        AgentChatHandle(
+            configuration: configuration, environment: environment, runtimeUserContext: runtimeUserContext
+        )
     }
     @MainActor public static func view(
         handle: AgentChatHandle, title: String = "Chat", fonts: ChatFonts? = nil,
         headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-        templateRegistry: RichTemplateRegistry? = nil, onClose: (() -> Void)? = nil
+        templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
+        onClose: (() -> Void)? = nil
     ) -> AgentChatView {
         AgentChatView(
-            handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder, footerBuilder: footerBuilder,
-            templateRegistry: templateRegistry, onClose: onClose)
+            handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder,
+            footerBuilder: footerBuilder,
+            templateRegistry: templateRegistry, uiOptions: uiOptions, onClose: onClose)
     }
     #if canImport(UIKit)
         @MainActor @discardableResult
         public static func show(
             in controller: UIViewController, handle: AgentChatHandle, title: String = "Chat",
-            fonts: ChatFonts? = nil, headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-            templateRegistry: RichTemplateRegistry? = nil, hidesBottomBarWhenPushed: Bool = true, animated: Bool = true
+            fonts: ChatFonts? = nil, headerBuilder: ChatHeaderBuilder? = nil,
+            footerBuilder: ChatFooterBuilder? = nil,
+            templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
+            hidesBottomBarWhenPushed: Bool = true, animated: Bool = true
         ) -> Bool {
-            guard let navigation = (controller as? UINavigationController) ?? controller.navigationController,
-                let source = navigation.topViewController, !(source is ChatNavigationHostingController<AgentChatView>)
+            guard
+                let navigation = (controller as? UINavigationController) ?? controller.navigationController,
+                let source = navigation.topViewController,
+                !(source is ChatNavigationHostingController<AgentChatView>)
             else { return false }
             handle.reopen()
             let chat = view(
-                handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder, footerBuilder: footerBuilder,
-                templateRegistry: templateRegistry
+                handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder,
+                footerBuilder: footerBuilder,
+                templateRegistry: templateRegistry, uiOptions: uiOptions
             ) { [weak navigation, weak source] in
                 guard let navigation, let source,
                     navigation.topViewController is ChatNavigationHostingController<AgentChatView>
@@ -72,12 +81,14 @@ extension AgentChatUI {
         @MainActor public static func present(
             from controller: UIViewController, handle: AgentChatHandle, title: String = "Chat",
             fonts: ChatFonts? = nil, headerBuilder: ChatHeaderBuilder? = nil,
-            footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil
+            footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
+            uiOptions: ChatUIOptions? = nil
         ) {
             handle.reopen()
             let chat = view(
-                handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder, footerBuilder: footerBuilder,
-                templateRegistry: templateRegistry
+                handle: handle, title: title, fonts: fonts, headerBuilder: headerBuilder,
+                footerBuilder: footerBuilder,
+                templateRegistry: templateRegistry, uiOptions: uiOptions
             ) { [weak controller] in controller?.dismiss(animated: true) }
             let host = UIHostingController(rootView: chat)
             let navigation = UINavigationController(rootViewController: host)

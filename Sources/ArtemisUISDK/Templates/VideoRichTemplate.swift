@@ -5,6 +5,6 @@ struct VideoRichTemplate: View {
     let accentColor: Color
 
     var body: some View {
-        MediaLinkTemplate(title: "Video", systemImage: "play.rectangle.fill", media: media, accentColor: accentColor)
+        InlineVideoPlayer(media: media)
     }
 }

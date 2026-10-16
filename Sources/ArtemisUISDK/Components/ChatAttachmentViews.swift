@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AttachmentDraftCard: View {
+    @Environment(\.chatStrings) private var strings
     let draft: AttachmentDraft
     let canRetry: Bool
     let canRemove: Bool
@@ -16,14 +17,18 @@ struct AttachmentDraftCard: View {
                     Text(statusLabel).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Button(action: onRemove) { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).disabled(!canRemove).accessibilityLabel("Remove \(draft.attachment.filename)")
+                    .buttonStyle(.plain).disabled(!canRemove).accessibilityLabel(
+                        strings.format("Remove {filename}", ["filename": draft.attachment.filename]))
             }
-            if draft.status == .uploading { ProgressView(value: draft.progress).frame(maxWidth: .infinity) }
+            if draft.status == .uploading {
+                ProgressView(value: draft.progress).frame(maxWidth: .infinity)
+            }
             if let error = draft.error { Text(error).font(.caption2).foregroundStyle(.red).lineLimit(2) }
             if draft.status == .uploading || draft.status == .queued {
-                Button("Cancel upload", action: onCancel).font(.caption).frame(minHeight: 44)
+                Button(strings("Cancel upload"), action: onCancel).font(.caption).frame(minHeight: 44)
             } else if draft.status == .failed || draft.status == .cancelled {
-                Button("Retry upload", action: onRetry).font(.caption).frame(minHeight: 44).disabled(!canRetry)
+                Button(strings("Retry upload"), action: onRetry).font(.caption).frame(minHeight: 44)
+                    .disabled(!canRetry)
             }
         }
         .padding(10).frame(width: 250, alignment: .leading)
@@ -33,16 +38,18 @@ struct AttachmentDraftCard: View {
     }
     private var statusLabel: String {
         switch draft.status {
-        case .queued: return "Queued"
-        case .uploading: return "Uploading \(Int(draft.progress * 100))%"
-        case .ready: return "Ready to send • " + draft.attachment.detail
-        case .failed: return "Upload failed"
-        case .cancelled: return "Cancelled"
+        case .queued: return strings("Queued")
+        case .uploading:
+            return strings.format("Uploading {percent}%", ["percent": String(Int(draft.progress * 100))])
+        case .ready: return strings("Ready to send") + " • " + draft.attachment.detail
+        case .failed: return strings("Upload failed")
+        case .cancelled: return strings("Cancelled")
         }
     }
 }
 
 struct FileTypeIcon: View {
+    @Environment(\.chatStrings) private var strings
     let attachment: ChatAttachment
     let isUser: Bool
     var body: some View {
@@ -64,6 +71,7 @@ struct FileTypeIcon: View {
 }
 
 struct AttachmentMessageGroup: View {
+    @Environment(\.chatStrings) private var strings
     let attachments: [ChatAttachment]
     let isUser: Bool
     let resolve: (ChatAttachment) async -> URL?
@@ -76,13 +84,18 @@ struct AttachmentMessageGroup: View {
                 } label: {
                     HStack {
                         Image(systemName: "paperclip")
-                        Text("\(attachments.count) attachments").font(.subheadline.weight(.semibold))
-                        if attachments.contains(where: \.deliveryFailed) { Text("Delivery failed").font(.caption) }
+                        Text(strings.format("{count} attachments", ["count": String(attachments.count)])).font(
+                            .subheadline.weight(.semibold))
+                        if attachments.contains(where: \.deliveryFailed) {
+                            Text(strings("Delivery failed")).font(.caption)
+                        }
                         Spacer()
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     }.frame(minHeight: 44)
                 }.buttonStyle(.plain).accessibilityLabel(
-                    "\(expanded ? "Collapse" : "Expand") \(attachments.count) attachments")
+                    strings.format(
+                        expanded ? "Collapse {count} attachments" : "Expand {count} attachments",
+                        ["count": String(attachments.count)]))
             }
             if attachments.count == 1 || expanded {
                 ForEach(attachments) { attachment in
@@ -93,6 +106,7 @@ struct AttachmentMessageGroup: View {
     }
 }
 private struct AttachmentMessageRow: View {
+    @Environment(\.chatStrings) private var strings
     let attachment: ChatAttachment
     let isUser: Bool
     let resolve: (ChatAttachment) async -> URL?
@@ -109,13 +123,16 @@ private struct AttachmentMessageRow: View {
             HStack(spacing: 8) {
                 FileTypeIcon(attachment: attachment, isUser: isUser)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(attachment.filename).font(.subheadline.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                    Text(attachment.deliveryFailed ? "Delivery failed" : attachment.detail).font(.caption2).opacity(0.8)
+                    Text(attachment.filename).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(attachment.deliveryFailed ? "Delivery failed" : attachment.detail).font(.caption2)
+                        .opacity(0.8)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if opening {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "arrow.down.to.line").font(.system(size: 18)).frame(width: 44, height: 44)
+                    Image(systemName: "arrow.down.to.line").font(.system(size: 18)).frame(
+                        width: 44, height: 44)
                 }
             }.padding(8).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain).disabled(opening || attachment.deliveryFailed)

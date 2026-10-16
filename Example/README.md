@@ -28,18 +28,16 @@ pod install
 open ArtemisUIExample.xcworkspace
 ```
 
-The Podfile links the UI SDK from this repository and `ArtemisSocketSDK` from
-the separate sibling repository:
+The Podfile links the combined UI/socket SDK from this repository:
 
 ```ruby
-pod 'ArtemisSocketSDK', :path => '../../artemis_ios_socket_sdk'
 pod 'ArtemisUISDK', :path => '..'
 ```
 
-Run `pod install` again after updating either checkout. The example retains an
-`AgentChatHandle` for minimize/reopen and opts
-in to attachments and transferred-agent chat; Runtime branding and permissions
-still control whether the attachment button appears.
+Run `pod install` again after updating the checkout. The example retains an
+`AgentChatHandle` for minimize/reopen. Runtime's `attachmentLimits.enabled`
+and the session's `attachment:write` permission control whether the attachment
+button appears; no local attachment feature flag is required.
 
 If switching from Swift Package Manager produces `Unable to find module dependency: CYaml`, remove this example's stale build products from its Derived Data folder, then rebuild the workspace. Old `Yams.swiftmodule`, `ArtemisSocketSDK.swiftmodule`, and `ArtemisUISDK.swiftmodule` files can shadow the CocoaPods frameworks. Do not add a separate CYaml dependency to the CocoaPods target.
 

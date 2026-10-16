@@ -15,7 +15,16 @@ import SwiftUI
     }()
     static func text(_ source: String) -> AttributedString {
         if let entry = cache.object(forKey: source as NSString) { return entry.text }
-        let result = (try? AttributedString(markdown: source)) ?? AttributedString(source)
+        var result =
+            (try? AttributedString(
+                markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(source)
+        let unsafeLinks = result.runs.compactMap { run -> Range<AttributedString.Index>? in
+            guard let url = run.link else { return nil }
+            return ["http", "https", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "")
+                && url.user == nil && url.password == nil ? nil : run.range
+        }
+        for range in unsafeLinks { result[range].link = nil }
         cache.setObject(Entry(result), forKey: source as NSString, cost: source.utf8.count * 2)
         return result
     }
@@ -52,13 +61,16 @@ private actor ChatImageCache {
                 source, 0,
                 [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 1024, kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 1024,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
                 ] as CFDictionary)
         }
         requests[url] = task
         let image = await task.value
         requests[url] = nil
-        if let image { cache.setObject(Entry(image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
+        if let image {
+            cache.setObject(Entry(image), forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+        }
         return image
     }
 }
@@ -71,7 +83,9 @@ struct TemplateRemoteImage<Content: View, Placeholder: View>: View {
         Group { if let image { content(image) } else { placeholder() } }
             .task(id: url) {
                 image = nil
-                guard let url, let result = await ChatImageCache.shared.image(url), !Task.isCancelled else { return }
+                guard let url, let result = await ChatImageCache.shared.image(url), !Task.isCancelled else {
+                    return
+                }
                 image = Image(decorative: result, scale: 1)
             }
     }

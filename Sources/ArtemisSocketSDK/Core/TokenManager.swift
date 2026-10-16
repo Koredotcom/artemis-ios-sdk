@@ -236,6 +236,9 @@ private let refreshLeewayMs: Int64 = 60 * 1000
             }
             if normalized["deploymentId"] == nil { normalized["deploymentId"] = current.deploymentId }
             if normalized["widgetConfig"] == nil { normalized["widgetConfig"] = widgetConfig?.raw.mapValues(\.value) }
+            if normalized["attachmentLimits"] == nil {
+                normalized["attachmentLimits"] = current.attachmentLimits?.raw.mapValues(\.value)
+            }
             if normalized["activityVisibilityPolicy"] == nil {
                 normalized["activityVisibilityPolicy"] = current.activityVisibilityPolicy.mapValues(\.value)
             }
@@ -245,6 +248,8 @@ private let refreshLeewayMs: Int64 = 60 * 1000
         nextScope.activityVisibilityPolicy = (normalized["activityVisibilityPolicy"] as? [String: Any] ?? [:])
             .mapValues(AnySendable.init)
         nextScope.widgetConfig = parsed.widgetConfig
+        nextScope.attachmentLimits = (normalized["attachmentLimits"] as? [String: Any])
+            .map { SDKAttachmentLimits(raw: $0) }
         token = parsed.token
         expiresAtMs = Int64(Date().timeIntervalSince1970 * 1000) + Int64(parsed.expiresIn) * 1000
         scope = nextScope

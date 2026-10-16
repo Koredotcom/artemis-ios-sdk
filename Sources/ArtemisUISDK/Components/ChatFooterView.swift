@@ -5,6 +5,7 @@ import SwiftUI
 #endif
 
 struct ChatFooterView: View {
+    @Environment(\.chatStrings) private var strings
     @Binding var text: String
     let enabled: Bool
     let canSend: Bool
@@ -19,35 +20,46 @@ struct ChatFooterView: View {
         VStack(spacing: 0) {
             Color(hexString: theme?.borderColor ?? "#E2E8F0").frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
-                if showAttachment { control("paperclip", label: "Add attachment", enabled: enabled, action: onAttach) }
+                if showAttachment {
+                    control("paperclip", label: "Add attachment", enabled: enabled, action: onAttach)
+                }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
-                        Text(placeholder).foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B")).padding(
-                            .horizontal, 14
-                        ).padding(.top, 10).allowsHitTesting(false)
+                        Text(placeholder).foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
+                            .padding(
+                                .horizontal, 14
+                            ).padding(.top, 10).allowsHitTesting(false)
                     }
                     #if canImport(UIKit)
                         GrowingChatInput(
                             text: $text, enabled: enabled, font: font,
-                            color: UIColor(Color(hexString: theme?.textColor)), onSend: onSend
+                            color: UIColor(Color(hexString: theme?.textColor)), onSend: onSend,
+                            accessibilityLabel: strings("Message"), fontSize: theme?.baseFontSize ?? 16
                         )
                         .frame(maxWidth: .infinity)
                         .fixedSize(horizontal: false, vertical: true)
                     #else
-                        TextEditor(text: $text).disabled(!enabled).frame(height: 60).opacity(text.isEmpty ? 0.5 : 1)
+                        TextEditor(text: $text).disabled(!enabled).frame(height: 60).opacity(
+                            text.isEmpty ? 0.5 : 1)
                     #endif
                 }
                 .font(.system(size: 16))
                 .background(Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"))
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(hexString: theme?.borderColor ?? "#E2E8F0")))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20).stroke(
+                        Color(hexString: theme?.borderColor ?? "#E2E8F0"))
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 20))
                 control("paperplane", label: "Send message", enabled: canSend, action: onSend)
             }
-            .padding(.horizontal, 12).padding(.vertical, 5)
+            .padding(.horizontal, 12 * (theme?.spacingScale ?? 1)).padding(
+                .vertical, 5 * (theme?.spacingScale ?? 1))
         }
         .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"))
     }
-    private func control(_ icon: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func control(_ icon: String, label: String, enabled: Bool, action: @escaping () -> Void)
+        -> some View
+    {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 18)).frame(width: 40, height: 40)
                 .foregroundStyle(Color(hexString: theme?.primaryColor ?? "#2563EB"))
@@ -55,8 +67,11 @@ struct ChatFooterView: View {
                     Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"),
                     in: RoundedRectangle(cornerRadius: 12)
                 )
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hexString: theme?.borderColor ?? "#E2E8F0")))
-        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4).accessibilityLabel(label)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12).stroke(
+                        Color(hexString: theme?.borderColor ?? "#E2E8F0")))
+        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4).accessibilityLabel(
+            strings(label))
     }
 }
 
@@ -67,6 +82,8 @@ struct ChatFooterView: View {
         let font: String?
         let color: UIColor
         let onSend: () -> Void
+        var accessibilityLabel: String = "Message"
+        var fontSize: Double = 16
         func makeCoordinator() -> Coordinator { Coordinator(self) }
         func makeUIView(context: Context) -> ComposerTextView {
             let view = ComposerTextView()
@@ -74,7 +91,7 @@ struct ChatFooterView: View {
             view.delegate = context.coordinator
             view.textContainerInset = UIEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
             view.returnKeyType = .send
-            view.accessibilityLabel = "Message"
+            view.accessibilityLabel = accessibilityLabel
             view.isScrollEnabled = true
             view.showsVerticalScrollIndicator = false
             view.isEditable = enabled
@@ -84,6 +101,7 @@ struct ChatFooterView: View {
         }
         func updateUIView(_ view: ComposerTextView, context: Context) {
             context.coordinator.parent = self
+            view.accessibilityLabel = accessibilityLabel
             var sizeChanged = false
             if view.text != text {
                 view.text = text
@@ -91,7 +109,8 @@ struct ChatFooterView: View {
             }
             context.coordinator.updateEditingAvailability(of: view)
             if view.textColor != color { view.textColor = color }
-            let resolvedFont = font.flatMap { UIFont(name: $0, size: 16) } ?? .systemFont(ofSize: 16)
+            let resolvedFont =
+                font.flatMap { UIFont(name: $0, size: fontSize) } ?? .systemFont(ofSize: fontSize)
             if view.font != resolvedFont {
                 view.font = resolvedFont
                 sizeChanged = true
@@ -99,7 +118,9 @@ struct ChatFooterView: View {
             if sizeChanged { view.invalidateIntrinsicContentSize() }
         }
         @available(iOS 16.0, *)
-        func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerTextView, context: Context) -> CGSize? {
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerTextView, context: Context)
+            -> CGSize?
+        {
             guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
             return CGSize(width: width, height: uiView.measuredHeight(for: width))
         }
@@ -124,7 +145,9 @@ struct ChatFooterView: View {
                 if parent.text != view.text { parent.text = view.text }
                 view.invalidateIntrinsicContentSize()
             }
-            func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            func textView(
+                _ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
+            ) -> Bool {
                 guard parent.enabled else { return false }
                 if text == "\n" {
                     parent.onSend()
@@ -139,7 +162,10 @@ struct ChatFooterView: View {
         func measuredHeight(for width: CGFloat) -> CGFloat {
             guard width.isFinite, width > 0 else { return 40 }
             return min(
-                120, max(40, ceil(super.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)))
+                120,
+                max(
+                    40,
+                    ceil(super.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)))
         }
         override var intrinsicContentSize: CGSize {
             CGSize(width: UIView.noIntrinsicMetric, height: measuredHeight(for: bounds.width))

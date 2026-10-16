@@ -107,13 +107,15 @@ public struct WidgetTheme: Sendable {
         let flag = raw["attachmentButtonEnabled"] as? NSNumber
         self.attachmentButtonEnabled =
             (flag.map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false)
-            || (raw["attachmentButtonEnabled"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            || (raw["attachmentButtonEnabled"] as? String)?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).lowercased()
                 == "true"
     }
 
     private static func asInt(_ value: Any?) -> Int? {
         if let int = value as? Int { return int }
-        if let double = value as? Double { return Int(double) }
+        if let double = value as? Double { return Int(exactly: double.rounded(.towardZero)) }
         if let string = value as? String { return Int(string) }
         return nil
     }

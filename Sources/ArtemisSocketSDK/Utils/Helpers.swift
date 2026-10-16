@@ -83,6 +83,17 @@ enum WebSocketAuth {
     }
 }
 
+/// Attachment policy returned by Runtime's SDK init and refresh endpoints.
+public struct SDKAttachmentLimits: Sendable {
+    public let enabled: Bool
+    public let raw: [String: AnySendable]
+
+    init(raw: [String: Any]) {
+        self.enabled = raw["enabled"] as? Bool ?? false
+        self.raw = raw.mapValues(AnySendable.init)
+    }
+}
+
 public struct SDKSessionScope: Sendable {
     public let tenantId: String
     public let projectId: String
@@ -92,6 +103,7 @@ public struct SDKSessionScope: Sendable {
     public let showActivityUpdates: Bool
     public var activityVisibilityPolicy: [String: AnySendable] = [:]
     public var widgetConfig: WidgetConfig? = nil
+    public var attachmentLimits: SDKAttachmentLimits? = nil
 }
 
 enum JSONValue {

@@ -5,6 +5,6 @@ struct AudioRichTemplate: View {
     let accentColor: Color
 
     var body: some View {
-        MediaLinkTemplate(title: "Audio", systemImage: "waveform", media: media, accentColor: accentColor)
+        InlineAudioPlayer(media: media)
     }
 }

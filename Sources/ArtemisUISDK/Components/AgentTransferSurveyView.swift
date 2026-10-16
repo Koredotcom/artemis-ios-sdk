@@ -1,9 +1,11 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 @MainActor struct AgentTransferSurveyView: View {
+    @Environment(\.chatStrings) private var strings
     let survey: AgentTransferSurvey
     @ObservedObject var state: SurveyPresentation
     let enabled: Bool
@@ -17,11 +19,14 @@ import SwiftUI
                         state.score = score
                         if !survey.showComment(for: score) { state.comments = "" }
                     } label: {
-                        Text(survey.surveyType == "likeDislike" ? (score == 1 ? "Like" : "Dislike") : "\(score)")
-                            .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44)
-                            .background(
-                                state.score == score ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1),
-                                in: RoundedRectangle(cornerRadius: 8))
+                        Text(
+                            survey.surveyType == "likeDislike"
+                                ? strings(score == 1 ? "Like" : "Dislike") : "\(score)"
+                        )
+                        .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(
+                            state.score == score ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 8))
                     }.buttonStyle(.plain).disabled(locked).accessibilityAddTraits(
                         state.score == score ? .isSelected : [])
                 }
@@ -47,7 +52,9 @@ import SwiftUI
                         Text(state.status == .pending ? survey.pendingMessage : survey.submitLabel)
                     }.frame(minHeight: 44)
                 }.disabled(locked || state.score == nil || !enabled)
-                if state.status == .failed { Text(survey.errorMessage).font(.caption).foregroundStyle(.red) }
+                if state.status == .failed {
+                    Text(survey.errorMessage).font(.caption).foregroundStyle(.red)
+                }
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))

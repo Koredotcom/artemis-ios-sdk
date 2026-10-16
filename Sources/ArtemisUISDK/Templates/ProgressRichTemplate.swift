@@ -1,10 +1,14 @@
 import Foundation
 import SwiftUI
+
 #if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
+    import ArtemisSocketSDK
 #endif
 
 struct ProgressRichTemplate: View {
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+    @Environment(\.chatStrings) private var strings
     let progress: ProgressTemplate
     let accentColor: Color
 
@@ -12,7 +16,7 @@ struct ProgressRichTemplate: View {
         if progress.variant == "circle" {
             VStack(spacing: 10) {
                 ZStack {
-                    Circle().stroke(TemplateStyle.border, lineWidth: 8)
+                    Circle().stroke(templateStyle.border, lineWidth: 8)
                     Circle()
                         .trim(from: 0, to: percent)
                         .stroke(accentColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
@@ -20,17 +24,21 @@ struct ProgressRichTemplate: View {
                     Text("\(Int(percent * 100))%").templateTitle()
                 }
                 .frame(width: 92, height: 92)
-                Text(progress.label ?? "Progress").templateSectionLabel()
+                Text(progress.label ?? strings("Progress")).templateSectionLabel()
             }
             .frame(maxWidth: .infinity)
         } else {
             VStack(alignment: .leading, spacing: 8) {
-                Text(progress.label ?? "Progress").templateSectionLabel()
+                Text(progress.label ?? strings("Progress")).templateSectionLabel()
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(TemplateStyle.progressTrack)
+                        Capsule().fill(templateStyle.progressTrack)
                         Capsule()
-                            .fill(LinearGradient(colors: [accentColor, accentColor.opacity(0.62)], startPoint: .leading, endPoint: .trailing))
+                            .fill(
+                                LinearGradient(
+                                    colors: [accentColor, accentColor.opacity(0.62)], startPoint: .leading,
+                                    endPoint: .trailing)
+                            )
                             .frame(width: proxy.size.width * percent)
                     }
                 }
@@ -40,5 +48,7 @@ struct ProgressRichTemplate: View {
         }
     }
 
-    private var percent: Double { max(progress.max, 1) == 0 ? 0 : min(max(progress.value / max(progress.max, 1), 0), 1) }
+    private var percent: Double {
+        max(progress.max, 1) == 0 ? 0 : min(max(progress.value / max(progress.max, 1), 0), 1)
+    }
 }

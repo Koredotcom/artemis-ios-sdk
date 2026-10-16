@@ -22,6 +22,8 @@ private final class ChatScrollMetrics {
 
 /// Follows new content only while the reader is at the bottom; sending forces a follow.
 struct ChatHistoryScrollView<Content: View>: View {
+    @Environment(\.chatTheme) private var theme
+    @Environment(\.chatStrings) private var strings
     let request: ChatHistoryScrollRequest
     @ViewBuilder let content: (CGFloat) -> Content
     @State private var followsLatest = true
@@ -36,7 +38,7 @@ struct ChatHistoryScrollView<Content: View>: View {
                     // their own horizontal scroll views. Eager measurement avoids
                     // LazyVStack's repeating item-phase/geometry updates when
                     // scrolling to these messages or changing keyboard height.
-                    VStack(spacing: 12) {
+                    VStack(spacing: 12 * (theme?.spacingScale ?? 1)) {
                         content(max(0, geometry.size.width - 32))
                         Color.clear.frame(height: 8).id(Anchor.bottom)
                     }
@@ -62,7 +64,9 @@ struct ChatHistoryScrollView<Content: View>: View {
                 .onPreferenceChange(ChatContentBottom.self) { value in
                     guard value.isFinite else { return }
                     metrics.bottom = value
-                    if metrics.dragging { updateFollowing(bottom: value, viewportHeight: geometry.size.height) }
+                    if metrics.dragging {
+                        updateFollowing(bottom: value, viewportHeight: geometry.size.height)
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !followsLatest {
@@ -70,8 +74,9 @@ struct ChatHistoryScrollView<Content: View>: View {
                             followsLatest = true
                             proxy.scrollTo(Anchor.bottom, anchor: .bottom)
                         } label: {
-                            Label("Latest", systemImage: "arrow.down").font(.caption).padding(10).background(
-                                .regularMaterial, in: Capsule())
+                            Label(strings("Latest"), systemImage: "arrow.down").font(.caption).padding(10)
+                                .background(
+                                    .regularMaterial, in: Capsule())
                         }.padding(12)
                     }
                 }

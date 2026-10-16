@@ -189,6 +189,17 @@ message metadata: `image`, `html`, `video`, `audio`, `file`, `list`, `kpi`,
 `quick_replies`, channel fallback payloads, and carousel cards. Interactive
 templates call the socket SDK's `submitAction`/`submitFeedback` paths.
 
+Quick replies use content-sized tinted pills with optional circular icons and
+wrap onto additional rows. Top-level assistant actions appear below the message
+bubble, with wrapping outlined buttons, labeled fields, and a filled submit
+button. Pending and submitted groups remain locked, with retry available after
+a failed submission. These controls support iOS 15 and later.
+
+WhatsApp, Slack, AG-UI, and Adaptive Card payloads use the WebSDK's channel
+preview style: a rounded, tinted card with a channel title and a readable
+summary. Structured previews collect up to three text fields, capped at 160
+characters; payloads without readable text show a localized fallback description.
+
 Host apps can still pass a `RichTemplateRegistry` for custom payloads. Register
 a renderer with the same type as a built-in, for example `RichTemplateTypes.kpi`,
 to suppress the default renderer and provide an app-specific one.
@@ -202,7 +213,7 @@ It includes the title/status header, retained-handle minimize/reopen lifecycle,
 five-file draft strip, file-type icons and expandable sent-file groups. Reading
 older messages pauses automatic following; sending or tapping Latest resumes it.
 
-Attachments and transferred-agent text UI are opt-in:
+Runtime controls attachment availability. Transferred-agent text UI is opt-in:
 
 ```swift
 let configuration = SDKConfiguration(
@@ -213,15 +224,18 @@ let configuration = SDKConfiguration(
         apiKey: "pk_your_public_key"
     ),
     channel: ChannelConfig(channelName: "mobile"),
-    features: FeaturesConfig(enableAttachments: true, enableContactCenter: true),
+    features: FeaturesConfig(enableContactCenter: true),
     attachments: AttachmentConfig(maxFileSizeBytes: 20 * 1024 * 1024)
 )
 ```
 
-The attachment button additionally requires Runtime init/refresh branding
-`widgetConfig.theme.attachmentButtonEnabled: true` (or the string `"true"`) and
-the `attachment:write` permission. It remains hidden when either is absent.
-Permission/branding revocation cancels uploads and prevents attachment sends;
+The attachment button uses `attachmentLimits.enabled` from Runtime's SDK
+init/refresh response: `true` shows the button and `false` hides it. The session
+must also grant `attachment:write`; missing or null attachment limits hide the
+button. Local `features.enableAttachments` and theme `attachmentButtonEnabled`
+do not control its visibility. Refresh responses that omit `attachmentLimits`
+preserve the last received policy. Disabling attachments or revoking permission
+cancels uploads and prevents attachment sends;
 text chat remains usable. The stock picker filters allowed MIME types. All
 staged files, including failed/cancelled files, count toward the five-file limit.
 Uploads are sequential, bounded to at most 20 MiB per nonempty file, and have
@@ -240,22 +254,19 @@ scope. Generic rich feedback supports thumbs and star ratings with retryable
 acknowledgment states; unsupported scale/text templates show an availability
 message instead of sending an incorrect rating type.
 
-These are local source changes, not a published release. This repository now
-contains the matching `ArtemisSocketSDK` source under
-`Sources/ArtemisSocketSDK`; SwiftPM builds it as a product alongside
-`ArtemisUISDK`. For local CocoaPods integration from the `Example` directory,
-the UI podspec still depends on the separately packaged socket pod, so use:
+These are local source changes, not a published release. This repository contains
+the matching `ArtemisSocketSDK` source under `Sources/ArtemisSocketSDK`. SwiftPM
+builds it as a separate product alongside `ArtemisUISDK`. CocoaPods compiles both
+source trees into the single `ArtemisUISDK` module. From `Example`, use:
 
 ```ruby
-pod 'ArtemisSocketSDK', :path => '../../artemis_ios_socket_sdk'
 pod 'ArtemisUISDK', :path => '..'
 ```
 
-The socket source in this repository was synchronized from the current local
-`artemis_ios_socket_sdk` checkout, including its uncommitted implementation
-updates. Run `pod install` after changing the CocoaPods dependencies. A future
-release must publish matching UI/socket artifacts; the existing published
-version numbers have not been changed here.
+Run `pod install` after source or podspec changes so the generated project includes
+new files. Import only `ArtemisUISDK` in a CocoaPods host; do not add the separate
+socket pod to that target. The existing published version numbers have not been
+changed here.
 
 The socket layer now supports server-authored user display/redaction, early and
 withheld renders, owned cancellation and late-frame suppression, canonical
@@ -272,7 +283,6 @@ Equivalent YAML additions live under the existing `artemis_sdk` root:
 
 ```yaml
 features:
-  enable_attachments: true
   enable_contact_center: true
   enable_history: true
   enable_citations: true
@@ -301,6 +311,78 @@ formatting helpers. The default header and message composer live in
 `Components/ChatHeaderView.swift` and `Components/ChatFooterView.swift`.
 These implementation types are internal; host apps customize the UI through
 the existing header/footer builders and `RichTemplateRegistry`.
+
+## Chat presentation features
+
+The stock UI now supports these additions, using the WebSDK chat and template
+behavior as the reference:
+
+| Feature | Native behavior |
+| --- | --- |
+| Ordinary assistant feedback | Opt-in thumbs, an optional negative-feedback comment, acknowledgment-driven status and retry; template feedback is kept separate. |
+| Timestamps | Runtime theme settings or host overrides; show/hide, above/below, interaction visibility, locale/12/24-hour time and date formats. Only committed user/assistant messages receive timestamps. |
+| Typed forms | Native date/time pickers, number/email/date/time validation, select validation and field-level errors. Date/time values retain `yyyy-MM-dd` / `HH:mm` wire formats. |
+| Markdown | Native headings, nested ordered/unordered lists, fenced code, tables, blockquotes, rules, images and inline formatting. Unsafe link schemes are disabled. |
+| UI strings | Host overrides and a host-bundle `ArtemisChat.strings` table, selected using the SDK locale configuration. English is the fallback; authored server prompts remain unchanged. |
+| Themes | Runtime font family/base size, density, background image and numeric/named bubble radius; template surfaces and text follow the effective theme. |
+| Audio | Inline play/pause, seeking, elapsed/duration display and retry. |
+| Video | Embedded native controls, seeking and iOS fullscreen presentation. |
+| HTML | Allowlisted formatted HTML in a nonpersistent WebKit view, with content scripts, forms, frames and authored CSS disabled. Links open through the host URL action. |
+| Thought summaries | Collapsed-by-default cards with accessible expansion and minimize/reopen state retention; existing local and Runtime visibility gates still apply. |
+
+Configure SwiftUI or UIKit presentation with the same options:
+
+```swift
+let options = ChatUIOptions(
+    enableMessageFeedback: true,
+    feedbackCommentMaxLength: 500,
+    timestamps: MessageTimestampSettings(
+        visibility: .interaction,
+        position: .below,
+        timeFormat: .twentyFourHour,
+        dateFormat: .dayMonthYear
+    ),
+    strings: ChatStrings(localeIdentifier: "fr", overrides: [
+        "Send message": "Envoyer",
+        "Reconnect": "Reconnecter",
+        "Open {filename}": "Ouvrir {filename}",
+        "validation.required": "Ce champ est obligatoire."
+    ])
+)
+
+// SwiftUI, including the retained-handle overload:
+AgentChatUI.view(configuration: configuration, uiOptions: options)
+// UIKit:
+AgentChatUI.present(from: self, configuration: configuration, uiOptions: options)
+```
+
+SwiftUI hosts can also use `.artemisChatOptions(options)` on an existing SDK
+view. An explicit `uiOptions` argument takes precedence over that environment
+modifier. Omit `timestamps` to use Runtime `messageTimestampEnabled`,
+`messageTimestampVisibility`, `messageTimestampPosition`,
+`messageTimestampTimeFormat` and `messageTimestampDateFormat` settings.
+Interaction visibility responds to a tap/hover and the accessible Show timestamp
+action. Locale and timezone formatting follow the SwiftUI environment.
+
+UI string keys are the English source copy; validation keys use the
+`validation.*` namespace. String overrides take precedence over the host's
+`<locale>.lproj/ArtemisChat.strings`, then its configured fallback locale and
+English defaults. Placeholders such as `{filename}`, `{count}` and `{max}` are
+replaced without interpreting user content. Translated catalogs are supplied by
+the host, as with WebSDK string overrides.
+
+Runtime `theme` also accepts `baseFontSize` (12–32 points), `fontFamily`,
+`density` (`compact`, `comfortable`, `spacious`), `backgroundImage`, and
+`messageBubbleRadius` (a number or `xs`, `s`, `m`, `l`, `xl`). Media does not
+autoplay; players pause on disappearance or app inactivity. URLs must use HTTP(S)
+and contain no embedded credentials. HTML formatting uses a restricted native
+allowlist rather than arbitrary browser documents; long HTML remains scrollable.
+Thought cards do not request extra diagnostics or enable hidden thoughts. A
+reasoning-only fallback requires the Runtime `includeReasonFallback` policy.
+
+These changes are local source additions, not a published release. Live feedback
+acceptance, remote media playback, and final device presentation still require
+validation against the host app and Runtime.
 
 ## Build
 

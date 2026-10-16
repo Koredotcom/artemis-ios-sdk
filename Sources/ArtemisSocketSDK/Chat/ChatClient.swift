@@ -43,54 +43,71 @@ import Foundation
     func clearPending() {}  // Never replay a potentially accepted turn after reconnect.
     func resendPending() {}
 
-    func send(text: String, metadata: [String: Any]? = nil, attachmentIds: [String]? = nil) async throws -> String {
+    func send(text: String, metadata: [String: Any]? = nil, attachmentIds: [String]? = nil)
+        async throws -> String
+    {
         guard sessionManager.isConnected() else { throw ChatClientError.notConnected }
         guard (attachmentIds?.count ?? 0) <= AttachmentConfig.maxFilesPerMessage,
-            attachmentIds?.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? true
+            attachmentIds?.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                ?? true
         else { throw AttachmentError("A message can contain at most five attachments") }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentIds?.isEmpty == false else {
+        guard
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || attachmentIds?.isEmpty == false
+        else {
             throw AttachmentError("Enter a message or attach a file")
         }
-        guard text.count <= 10_000 else { throw AttachmentError("Messages must be 10,000 characters or fewer") }
+        guard text.count <= 10_000 else {
+            throw AttachmentError("Messages must be 10,000 characters or fewer")
+        }
         let id = UUID().uuidString
         let acceptedAt = Date()
         try await sessionManager.sendAsync(
             .chatMessage(
                 text: text, messageId: id, sessionId: sessionManager.getSessionId(),
-                attachmentIds: attachmentIds, metadata: metadata, customData: customData.isEmpty ? nil : customData))
-        acceptedUser(id: id, text: text, metadata: metadata, attachmentIds: attachmentIds, timestamp: acceptedAt)
+                attachmentIds: attachmentIds, metadata: metadata,
+                customData: customData.isEmpty ? nil : customData))
+        acceptedUser(
+            id: id, text: text, metadata: metadata, attachmentIds: attachmentIds, timestamp: acceptedAt)
         return id
     }
 
     private func acceptedUser(
-        id: String, text: String, metadata: [String: Any]?, attachmentIds: [String]? = nil, timestamp: Date = Date()
+        id: String, text: String, metadata: [String: Any]?, attachmentIds: [String]? = nil,
+        timestamp: Date = Date()
     ) {
         var safeMetadata = redaction ? [:] : metadata ?? [:]
         if redaction { safeMetadata.removeValue(forKey: "display_label") }
         let message = Message(
             id: id, role: .user, content: redaction ? "••••" : text, timestamp: timestamp,
-            metadata: safeMetadata.mapValues(AnySendable.init), attachmentIds: attachmentIds, pendingRender: redaction,
+            metadata: safeMetadata.mapValues(AnySendable.init), attachmentIds: attachmentIds,
+            pendingRender: redaction,
             status: .accepted)
         upsert(message)
         emit(.messageReceived(message))
         let completedEarly = lastTerminalActivity >= timestamp
         activeRequest = completedEarly ? nil : id
-        if let early = parkedRenders.removeValue(forKey: id) { applyRender(id: id, text: early.0, withheld: early.1) }
+        if let early = parkedRenders.removeValue(forKey: id) {
+            applyRender(id: id, text: early.0, withheld: early.1)
+        }
         setTyping(!completedEarly && transferStatus != .queued && transferStatus != .connected)
     }
 
     func submitAction(
-        actionId: String, value: String? = nil, formData: [String: String]? = nil, renderId: String? = nil
+        actionId: String, value: String? = nil, formData: [String: String]? = nil,
+        renderId: String? = nil
     ) throws {
         guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatClientError.emptyActionId
         }
         if alreadySubmitted(renderId) { return }
-        try sessionManager.send(.actionSubmit(actionId: actionId, value: value, formData: formData, renderId: renderId))
+        try sessionManager.send(
+            .actionSubmit(actionId: actionId, value: value, formData: formData, renderId: renderId))
         recordAction(actionId, value: value, renderId: renderId)
     }
     func performAction(
-        actionId: String, value: String?, formData: [String: String]?, renderId: String?, displayText: String?
+        actionId: String, value: String?, formData: [String: String]?, renderId: String?,
+        displayText: String?
     ) async throws {
         guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatClientError.emptyActionId
@@ -122,12 +139,15 @@ import Foundation
         guard let renderId else { return false }
         return messages.contains { message in
             let actions = message.metadata?["actions"]?.value as? [String: Any] ?? [:]
-            return (actions["renderId"] as? String ?? message.id) == renderId && actions["submitted"] != nil
+            return (actions["renderId"] as? String ?? message.id) == renderId
+                && actions["submitted"] != nil
         }
     }
     private func recordAction(_ action: String, value: String?, renderId: String?) {
         guard let renderId else { return }
-        let selection: [String: Any] = ["actionId": action, "value": value ?? "", "status": "submitted"]
+        let selection: [String: Any] = [
+            "actionId": action, "value": value ?? "", "status": "submitted",
+        ]
         messages = messages.map { message in
             var metadata = message.metadata?.mapValues(\.value) ?? [:]
             var actions = metadata["actions"] as? [String: Any] ?? [:]
@@ -150,31 +170,43 @@ import Foundation
         return try await waitForAck(
             key: key, survey: false, timeout: timeout,
             frame: .feedbackSubmit(
-                messageId: messageId, ratingType: ratingType, ratingValue: ratingValue, feedbackText: feedbackText,
+                messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
+                feedbackText: feedbackText,
                 actionRenderId: actionRenderId))
     }
-    func submitAgentTransferSurvey(_ survey: AgentTransferSurvey, score: Int, comments: String?) async throws -> String
+    func submitAgentTransferSurvey(_ survey: AgentTransferSurvey, score: Int, comments: String?)
+        async throws -> String
     {
         guard config.features.enableContactCenter, sessionManager.isConnected() else {
             throw ChatClientError.notConnected
         }
         guard survey.validScore(score) else { throw AttachmentError("Invalid survey score") }
-        guard pendingSurveys[survey.artemisSessionId] == nil else { throw ChatClientError.feedbackAlreadyPending }
+        guard pendingSurveys[survey.artemisSessionId] == nil else {
+            throw ChatClientError.feedbackAlreadyPending
+        }
         var payload: [String: Any] = [
             "type": "agent_transfer_survey.submit", "artemisSessionId": survey.artemisSessionId,
             "surveyType": survey.surveyType, "score": score,
         ]
         payload["smartAssistSessionId"] = survey.smartAssistSessionId
-        if survey.showComment(for: score), let comments { payload["comments"] = String(comments.prefix(4000)) }
-        return try await waitForAck(key: survey.artemisSessionId, survey: true, timeout: 10, frame: .raw(payload))
+        if survey.showComment(for: score), let comments {
+            payload["comments"] = String(comments.prefix(4000))
+        }
+        return try await waitForAck(
+            key: survey.artemisSessionId, survey: true, timeout: 10, frame: .raw(payload))
     }
-    private func waitForAck(key: String, survey: Bool, timeout: TimeInterval, frame: TransportClientMessage)
+    private func waitForAck(
+        key: String, survey: Bool, timeout: TimeInterval, frame: TransportClientMessage
+    )
         async throws -> String
     {
         try await withCheckedThrowingContinuation { continuation in
             let timer = Task { [weak self] in
-                do { try await Task.sleep(nanoseconds: UInt64(max(0.01, timeout) * 1_000_000_000)) } catch { return }
-                self?.finishAck(key: key, survey: survey, result: .failure(ChatClientError.feedbackTimeout(timeout)))
+                do { try await Task.sleep(nanoseconds: UInt64(max(0.01, timeout) * 1_000_000_000)) } catch {
+                    return
+                }
+                self?.finishAck(
+                    key: key, survey: survey, result: .failure(ChatClientError.feedbackTimeout(timeout)))
             }
             let pending = PendingFeedback(continuation: continuation, timer: timer)
             if survey { pendingSurveys[key] = pending } else { pendingFeedback[key] = pending }
@@ -186,7 +218,8 @@ import Foundation
         }
     }
     private func finishAck(key: String, survey: Bool, result: Result<String, Error>) {
-        let pending = survey ? pendingSurveys.removeValue(forKey: key) : pendingFeedback.removeValue(forKey: key)
+        let pending =
+            survey ? pendingSurveys.removeValue(forKey: key) : pendingFeedback.removeValue(forKey: key)
         pending?.timer.cancel()
         pending?.continuation.resume(with: result)
     }
@@ -229,10 +262,13 @@ import Foundation
                 emit(.agentTransferChanged(.none))
             }
             currentSessionId = session
-            redaction = (raw["capabilities"] as? [String: Any])?["liveUserInputRedaction"] as? Bool == true
+            redaction =
+                (raw["capabilities"] as? [String: Any])?["liveUserInputRedaction"] as? Bool == true
             activeResponse = nil
             activeRequest = nil
-            if (raw["initialAssistantMessage"] as? [String: Any])?["expected"] as? Bool == true { setTyping(true) }
+            if (raw["initialAssistantMessage"] as? [String: Any])?["expected"] as? Bool == true {
+                setTyping(true)
+            }
         case "response_start":
             guard let id, !cancelled.contains(id) else { return }
             activeResponse = id
@@ -265,7 +301,8 @@ import Foundation
             var item = MessageNormalizer.parse(normalizedRaw, id: responseID)
             if item.content.isEmpty, let old { item = item.replacing(content: old.content) }
             let hasPayload =
-                !item.content.isEmpty || item.metadata?["richContent"] != nil || item.metadata?["actions"] != nil
+                !item.content.isEmpty || item.metadata?["richContent"] != nil
+                || item.metadata?["actions"] != nil
                 || !item.renderables.isEmpty || item.agentLink != nil || item.agentTransferSurvey != nil
                 || item.metadata?["attachments"] != nil
             if hasPayload {
@@ -276,7 +313,8 @@ import Foundation
                 messages.removeAll { $0.id == responseID }
                 emit(.historyLoaded(messages: messages))
             }
-            if config.features.enableContactCenter, AgentTransfer.status(item) == .queued, transferStatus != .connected
+            if config.features.enableContactCenter, AgentTransfer.status(item) == .queued,
+                transferStatus != .connected
             {
                 setTransfer(.queued)
             }
@@ -373,11 +411,17 @@ import Foundation
         emit(.historyLoaded(messages: messages))
     }
     private func handleTransfer(_ raw: [String: Any]) {
-        guard config.features.enableContactCenter, currentSessionId != nil, let event = AgentTransfer.parse(raw) else {
+        guard config.features.enableContactCenter, currentSessionId != nil,
+            let event = AgentTransfer.parse(raw)
+        else {
             return
         }
-        let transitions = ["agent:queued", "agent:waiting_message", "agent:connected", "agent:disconnected"]
-        guard !transitions.contains(event.type) || event.timestamp >= lastTransferTransition else { return }
+        let transitions = [
+            "agent:queued", "agent:waiting_message", "agent:connected", "agent:disconnected",
+        ]
+        guard !transitions.contains(event.type) || event.timestamp >= lastTransferTransition else {
+            return
+        }
         for item in event.messages {
             guard
                 !item.content.isEmpty || item.agentLink != nil || item.agentTransferSurvey != nil
@@ -397,7 +441,8 @@ import Foundation
         case "agent:waiting_message":
             if transferStatus != .connected || transferSessionId != event.sessionId { next = .queued }
         case "agent:connected": next = .connected
-        case "agent:message", "agent:form", "agent.attachment": if transferStatus != .disconnected { next = .connected }
+        case "agent:message", "agent:form", "agent.attachment":
+            if transferStatus != .disconnected { next = .connected }
         case "agent:disconnected": next = .disconnected
         default: break
         }
@@ -413,7 +458,8 @@ import Foundation
             emit(.activity(text: nil))
         }
         if ["agent:typing", "agent:typing_stop", "agent:message"].contains(event.type),
-            transferSessionId == nil || transferSessionId == event.sessionId, transferStatus != .disconnected
+            transferSessionId == nil || transferSessionId == event.sessionId,
+            transferStatus != .disconnected
         {
             setTyping(event.type == "agent:typing")
         }
@@ -430,16 +476,22 @@ import Foundation
             setTyping(false)
             return
         }
-        guard config.features.enableActivityUpdates, let scope = sessionManager.getScope(), scope.showActivityUpdates
+        guard config.features.enableActivityUpdates, let scope = sessionManager.getScope(),
+            scope.showActivityUpdates
         else { return }
         let policy = scope.activityVisibilityPolicy.mapValues(\.value)
         guard policy["enabled"] as? Bool != false else { return }
-        let category = type == "thought" ? "thoughtSummaries" : type == "status_update" ? "fillers" : "systemNotices"
+        let category =
+            type == "thought" ? "thoughtSummaries" : type == "status_update" ? "fillers" : "systemNotices"
         guard policy[category] as? Bool ?? (category != "thoughtSummaries") else { return }
         if type == "thought", !config.chat.enableThoughts { return }
         let value: String?
         switch type {
-        case "thought": value = MessageNormalizer.string(raw, ["thought", "content", "reasoning"])
+        case "thought":
+            value =
+                MessageNormalizer.string(raw, ["thought", "content"])
+                ?? (policy["includeReasonFallback"] as? Bool == true
+                    ? MessageNormalizer.string(raw, ["reasoning"]) : nil)
         case "status_update": value = MessageNormalizer.string(raw, ["text", "content"])
         case "handoff":
             value =
@@ -457,9 +509,21 @@ import Foundation
             emit(.activity(text: text))
             setTyping(true)
         } else {
+            var metadata: [String: AnySendable] = [:]
+            if type == "thought", policy["exposeToolNames"] as? Bool == true,
+                let name = MessageNormalizer.string(raw, ["toolName"])
+            {
+                metadata["toolName"] = AnySendable(name)
+            }
+            if type == "thought", policy["exposeAgentNames"] as? Bool == true,
+                let name = MessageNormalizer.string(raw, ["agentName", "agent"])
+            {
+                metadata["agentName"] = AnySendable(name)
+            }
             let message = Message(
-                id: raw["messageId"] as? String ?? UUID().uuidString, role: type == "thought" ? .thought : .system,
-                content: text)
+                id: raw["messageId"] as? String ?? UUID().uuidString,
+                role: type == "thought" ? .thought : .system,
+                content: text, metadata: metadata.isEmpty ? nil : metadata)
             upsert(message)
             emit(.messageReceived(message))
         }
@@ -470,7 +534,9 @@ import Foundation
     private func upsert(_ item: Message) {
         if let i = messages.firstIndex(where: { $0.id == item.id }) {
             messages[i] = item
-        } else if item.role == .user, let index = messages.firstIndex(where: { $0.timestamp > item.timestamp }) {
+        } else if item.role == .user,
+            let index = messages.firstIndex(where: { $0.timestamp > item.timestamp })
+        {
             messages.insert(item, at: index)
         } else {
             messages.append(item)
@@ -480,7 +546,8 @@ import Foundation
     private func emit(_ event: ChatEvent) { delegate?.chatClient(self, didReceive: event) }
 
     func hydratePersistedHistory() {
-        guard config.features.enableHistory, let id = sessionManager.getSessionId(), historyTask == nil else { return }
+        guard config.features.enableHistory, let id = sessionManager.getSessionId(), historyTask == nil
+        else { return }
         let epoch = historyGeneration
         let transferAtRequest = transferRevision
         historyTask = Task { [weak self] in
@@ -488,7 +555,8 @@ import Foundation
             defer { if epoch == self.historyGeneration { self.historyTask = nil } }
             do {
                 let fetched = try await self.fetchHistory(sessionId: id)
-                guard !Task.isCancelled, epoch == self.historyGeneration, id == self.sessionManager.getSessionId()
+                guard !Task.isCancelled, epoch == self.historyGeneration,
+                    id == self.sessionManager.getSessionId()
                 else { return }
                 self.mergeHistory(fetched, transferAtRequest: transferAtRequest)
             } catch {
@@ -513,7 +581,8 @@ import Foundation
             request.setValue(token, forHTTPHeaderField: "X-SDK-Token")
             let (data, response) = try await httpSession.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                throw ChatClientError.historyRequestFailed(status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+                throw ChatClientError.historyRequestFailed(
+                    status: (response as? HTTPURLResponse)?.statusCode ?? 0)
             }
             let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             let records = body["messages"] as? [[String: Any]] ?? []
@@ -523,7 +592,8 @@ import Foundation
                 else { return nil }
                 return MessageNormalizer.parse(raw, role: role, id: id)
             }
-            guard body["hasMore"] as? Bool == true, let next = body["nextCursor"] as? String, !next.isEmpty,
+            guard body["hasMore"] as? Bool == true, let next = body["nextCursor"] as? String,
+                !next.isEmpty,
                 next != cursor
             else { break }
             cursor = next
@@ -550,9 +620,13 @@ import Foundation
         let identities = Set(history.compactMap(AgentTransfer.identity))
         let localIDs = Set(messages.map(\.id))
         var pool: [String: Int] = [:]
-        for item in history where !localIDs.contains(item.id) { pool[fingerprint(item), default: 0] += 1 }
+        for item in history where !localIDs.contains(item.id) {
+            pool[fingerprint(item), default: 0] += 1
+        }
         let locals = messages.filter { item in
-            if ids.contains(item.id) || AgentTransfer.identity(item).map({ identities.contains($0) }) == true {
+            if ids.contains(item.id)
+                || AgentTransfer.identity(item).map({ identities.contains($0) }) == true
+            {
                 return false
             }
             if item.status == .streaming || item.pendingRender { return true }
@@ -565,7 +639,9 @@ import Foundation
             return true
         }
         if !history.isEmpty && history.allSatisfy({ $0.sequence != nil }) {
-            messages = history.sorted { $0.sequence! < $1.sequence! } + locals.sorted { $0.timestamp < $1.timestamp }
+            messages =
+                history.sorted { $0.sequence! < $1.sequence! }
+                + locals.sorted { $0.timestamp < $1.timestamp }
         } else {
             messages = (history + locals).sorted { $0.timestamp < $1.timestamp }
         }
@@ -573,12 +649,15 @@ import Foundation
             ($0.metadata?["custom"]?.value as? [String: Any])?["actionSubmit"] as? [String: Any]
         }
         for selection in selections {
-            if let render = selection["renderId"] as? String, let action = selection["actionId"] as? String {
+            if let render = selection["renderId"] as? String,
+                let action = selection["actionId"] as? String
+            {
                 recordAction(action, value: selection["value"] as? String, renderId: render)
             }
         }
         messages = Array(messages.suffix(max(1, config.chat.maxMessagesLocal)))
-        if config.features.enableContactCenter, transferAtRequest == nil || transferAtRequest == transferRevision,
+        if config.features.enableContactCenter,
+            transferAtRequest == nil || transferAtRequest == transferRevision,
             let latest = messages.last(where: { AgentTransfer.status($0) != nil }),
             latest.timestamp >= lastTransferTransition
         {
@@ -591,7 +670,8 @@ import Foundation
     private func fingerprint(_ message: Message) -> String {
         let raw = message.metadata?.mapValues(\.value) ?? [:]
         return MessageNormalizer.jsonString([
-            "role": message.role.rawValue, "text": message.content, "richContent": raw["richContent"] ?? NSNull(),
+            "role": message.role.rawValue, "text": message.content,
+            "richContent": raw["richContent"] ?? NSNull(),
             "actions": raw["actions"] ?? NSNull(), "attachments": raw["attachments"] ?? NSNull(),
         ])
     }

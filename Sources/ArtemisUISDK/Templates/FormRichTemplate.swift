@@ -1,10 +1,14 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import Foundation
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 struct FormRichTemplate: View {
+    @Environment(\.chatTheme) private var chatTheme
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+    @Environment(\.chatStrings) private var strings
     let form: FormTemplate
     let messageId: String
     let context: RichTemplateContext
@@ -12,6 +16,7 @@ struct FormRichTemplate: View {
     @State private var submitted = false
     @State private var pending = false
     @State private var error: String?
+    @State private var showErrors = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -19,25 +24,46 @@ struct FormRichTemplate: View {
                 Text(title).templateTitle()
             }
             ForEach(form.fields) { field in
-                FieldView(
-                    field: field, value: binding(for: field), accentColor: context.accentColor, submitted: submitted)
+                if field.type == "button" {
+                    Button(field.label) {
+                        pending = true
+                        Task {
+                            defer { pending = false }
+                            do {
+                                try await context.perform(field.id, value: field.value, renderId: messageId)
+                                submitted = true
+                            } catch { self.error = strings("Form could not be sent. Please retry.") }
+                        }
+                    }.disabled(locked)
+                } else {
+                    FieldView(
+                        field: field, value: binding(for: field), accentColor: context.accentColor,
+                        submitted: locked)
+                    if let error = validationErrors[field.id], showErrors || !(values[field.id] ?? "").isEmpty {
+                        Text(strings(error)).font(.caption).foregroundStyle(.red).accessibilityLabel(
+                            field.label + ": " + strings(error))
+                    }
+                }
             }
-            Button(form.submitLabel ?? "Submit") {
+            Button(form.submitLabel ?? strings("Submit")) {
+                showErrors = true
+                guard validationErrors.isEmpty else { return }
                 pending = true
                 error = nil
                 Task {
                     defer { pending = false }
                     do {
                         try await context.perform(
-                            "form-submit", value: encodeFormSubmitPayload(resolvedValues), formData: resolvedValues,
+                            "form-submit", value: encodeFormSubmitPayload(resolvedValues),
+                            formData: resolvedValues,
                             renderId: messageId)
                         submitted = true
-                    } catch { self.error = "Form could not be sent. Please retry." }
+                    } catch { self.error = strings("Form could not be sent. Please retry.") }
                 }
             }
             .buttonStyle(FilledCapsuleButtonStyle(accentColor: context.accentColor))
-            .disabled(!isValid || submitted || pending || context.submittedActionId != nil)
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            .disabled(locked)
+            if let error { Text(strings(error)).font(.caption).foregroundStyle(.red) }
         }
         .templateCard(padding: 18)
         .onAppear {
@@ -50,11 +76,22 @@ struct FormRichTemplate: View {
     }
 
     private var resolvedValues: [String: String] {
-        Dictionary(uniqueKeysWithValues: form.fields.map { ($0.id, values[$0.id] ?? $0.value ?? "") })
+        Dictionary(
+            form.fields.filter { $0.type != "button" }.map { ($0.id, values[$0.id] ?? $0.value ?? "") },
+            uniquingKeysWith: { _, last in last })
     }
 
-    private var isValid: Bool {
-        form.fields.allSatisfy { !$0.required || !(values[$0.id] ?? $0.value ?? "").templateTrimmed.isEmpty }
+    private var locked: Bool { submitted || pending || context.submittedActionId != nil }
+    private var validationErrors: [String: String] {
+        Dictionary(
+            form.fields.filter { $0.type != "button" }.compactMap { field in
+                FormFieldValidation.error(
+                    value: resolvedValues[field.id] ?? "", required: field.required,
+                    inputType: field.inputType,
+                    allowedOptions: field.type == "select" ? field.options.map(\.id) : nil
+                )
+                .map { (field.id, $0) }
+            }, uniquingKeysWith: { _, last in last })
     }
 
     private func binding(for field: FormTemplateField) -> Binding<String> {
@@ -62,6 +99,9 @@ struct FormRichTemplate: View {
     }
 
     private struct FieldView: View {
+        @Environment(\.chatTheme) private var chatTheme
+        private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+        @Environment(\.chatStrings) private var strings
         let field: FormTemplateField
         @Binding var value: String
         let accentColor: Color
@@ -79,22 +119,22 @@ struct FormRichTemplate: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 if !value.isEmpty {
                                     Text(field.label + (field.required ? " *" : "")).font(.caption2.weight(.semibold))
-                                        .foregroundStyle(TemplateStyle.mutedText)
+                                        .foregroundStyle(templateStyle.mutedText)
                                 }
                                 Text(selectedLabel)
-                                    .foregroundStyle(value.isEmpty ? TemplateStyle.mutedText : TemplateStyle.text)
+                                    .foregroundStyle(value.isEmpty ? templateStyle.mutedText : templateStyle.text)
                             }
                             Spacer()
-                            Image(systemName: "chevron.down").foregroundStyle(TemplateStyle.mutedText)
+                            Image(systemName: "chevron.down").foregroundStyle(templateStyle.mutedText)
                         }
                         .templateInputBorder(accentColor: accentColor, focused: !value.isEmpty)
                     }
                     .disabled(submitted)
                 } else {
-                    TextField(field.placeholder ?? field.label, text: $value)
-                        .formKeyboardType(field.inputType)
-                        .disabled(submitted)
-                        .templateTextField(accentColor: accentColor)
+                    TypedFormInput(
+                        label: field.label, placeholder: field.placeholder, inputType: field.inputType,
+                        value: $value, accentColor: accentColor
+                    ).disabled(submitted)
                 }
             }
         }

@@ -19,6 +19,6 @@ Pod::Spec.new do |s|
   s.resource_bundles = {
     'ArtemisUISDK_Privacy' => ['Sources/ArtemisSocketSDK/PrivacyInfo.xcprivacy']
   }
-  s.frameworks = 'Foundation', 'SwiftUI', 'Combine', 'UIKit', 'CryptoKit'
+  s.frameworks = 'Foundation', 'SwiftUI', 'Combine', 'UIKit', 'CryptoKit', 'AVKit', 'AVFoundation', 'WebKit'
   s.dependency 'Yams', '~> 5.0'
 end

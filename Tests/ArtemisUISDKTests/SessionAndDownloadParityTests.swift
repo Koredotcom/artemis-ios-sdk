@@ -72,6 +72,80 @@ final class SessionAndDownloadParityTests: XCTestCase {
         _ = try await manager.getToken()
         XCTAssertNil(manager.getWidgetConfig())
     }
+    @MainActor func testAttachmentLimitsDriveComposerOnInitAndRefreshWithoutLocalOrThemeOptIn() async throws {
+        var enabled = tokenPayload(expires: 1, branding: false)
+        enabled["attachmentLimits"] = ["enabled": true, "maxFileSizeBytes": 20_971_520]
+        var disabled = tokenPayload()
+        disabled["attachmentLimits"] = ["enabled": false]
+        let http = session([enabled, disabled])
+        defer { http.invalidateAndCancel() }
+        let config = SDKConfiguration(
+            environment: "dev",
+            connection: ConnectionConfig(projectId: "p", endpoint: "https://fixture.invalid", apiKey: "fixture"))
+        let model = AgentChatViewModel(
+            configuration: config, environment: nil, configResource: "unused", runtimeUserContext: nil)
+        let manager = TokenManager(config: config, urlSession: http)
+        manager.onScopeChanged = { model.updateAttachmentPolicy($0) }
+
+        _ = try await manager.getToken()
+        XCTAssertFalse(config.features.enableAttachments)
+        XCTAssertEqual(manager.getWidgetConfig()?.theme?.attachmentButtonEnabled, false)
+        XCTAssertEqual(manager.getScope()?.attachmentLimits?.enabled, true)
+        XCTAssertEqual(manager.getScope()?.attachmentLimits?.raw["maxFileSizeBytes"]?.value as? Int, 20_971_520)
+        XCTAssertTrue(model.attachmentsAllowed)
+
+        model.attachmentDrafts = [
+            AttachmentDraft(
+                id: "upload", attachment: ChatAttachment(id: "", filename: "example.pdf"), status: .uploading,
+                source: URL(fileURLWithPath: "/unused/example.pdf"), sessionId: "fixture", removesSource: false)
+        ]
+        _ = try await manager.getToken()
+        XCTAssertEqual(manager.getScope()?.attachmentLimits?.enabled, false)
+        XCTAssertFalse(model.attachmentsAllowed)
+        XCTAssertEqual(model.attachmentDrafts.first?.status, .cancelled)
+    }
+
+    @MainActor func testAttachmentLimitsPreserveOmittedRefreshAndClearOnNullOrMissingInit() async throws {
+        var enabled = tokenPayload(expires: 1)
+        enabled["attachmentLimits"] = ["enabled": true]
+        let omitted = tokenPayload(expires: 1)
+        var cleared = tokenPayload()
+        cleared["attachmentLimits"] = NSNull()
+        let http = session([enabled, omitted, cleared, tokenPayload()])
+        defer { http.invalidateAndCancel() }
+        let config = SDKConfiguration(
+            environment: "dev",
+            connection: ConnectionConfig(projectId: "p", endpoint: "https://fixture.invalid", apiKey: "fixture"))
+        let manager = TokenManager(config: config, urlSession: http)
+        _ = try await manager.getToken()
+        _ = try await manager.getToken()
+        XCTAssertEqual(manager.getScope()?.attachmentLimits?.enabled, true)
+        _ = try await manager.getToken()
+        XCTAssertNil(manager.getScope()?.attachmentLimits)
+        manager.invalidateToken()
+        _ = try await manager.getToken()
+        XCTAssertNil(manager.getScope()?.attachmentLimits)
+    }
+
+    @MainActor func testAttachmentLimitsStillRequireUploadPermission() {
+        let model = AgentChatViewModel(
+            configuration: nil, environment: nil, configResource: "unused", runtimeUserContext: nil)
+        var scope = SDKSessionScope(
+            tenantId: "t", projectId: "p", channelId: "c", deploymentId: nil,
+            permissions: ["chat:write"], showActivityUpdates: false)
+        scope.attachmentLimits = SDKAttachmentLimits(raw: ["enabled": true])
+        model.updateAttachmentPolicy(scope)
+        XCTAssertFalse(model.attachmentsAllowed)
+        var allowed = SDKSessionScope(
+            tenantId: "t", projectId: "p", channelId: "c", deploymentId: nil,
+            permissions: ["attachment:write"], showActivityUpdates: false)
+        allowed.attachmentLimits = scope.attachmentLimits
+        model.updateAttachmentPolicy(allowed)
+        XCTAssertTrue(model.attachmentsAllowed)
+        model.updateAttachmentPolicy(nil)
+        XCTAssertFalse(model.attachmentsAllowed)
+    }
+
     @MainActor func testScopeMismatchRejectsTokenAndDoesNotPublishChangedScope() async throws {
         var changed = tokenPayload()
         changed["channelId"] = "different"

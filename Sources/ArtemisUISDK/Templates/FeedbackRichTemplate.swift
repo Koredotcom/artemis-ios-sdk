@@ -1,9 +1,11 @@
-#if canImport(ArtemisSocketSDK)
-import ArtemisSocketSDK
-#endif
 import SwiftUI
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 struct FeedbackRichTemplate: View {
+    @Environment(\.chatStrings) private var strings
     let feedback: FeedbackTemplate
     let messageId: String
     let context: RichTemplateContext
@@ -16,9 +18,9 @@ struct FeedbackRichTemplate: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(feedback.prompt).templateTitle()
             if !supported {
-                Text("This feedback type is not available yet").templateBody()
+                Text(strings("This feedback type is not available yet")).templateBody()
             } else if submitted {
-                Text("Thanks for your feedback.").font(.subheadline)
+                Text(strings("Thanks for your feedback.")).font(.subheadline)
             } else {
                 HStack(spacing: 8) {
                     if feedback.type == "thumbs" {
@@ -32,20 +34,24 @@ struct FeedbackRichTemplate: View {
                                 Image(systemName: (selected ?? 0) >= rating ? "star.fill" : "star").font(
                                     .system(size: 22)
                                 ).frame(minWidth: 36, minHeight: 44)
-                            }.buttonStyle(.plain).disabled(pending).accessibilityLabel("\(rating) stars")
+                            }.buttonStyle(.plain).disabled(pending).accessibilityLabel(
+                                strings.format("{count} stars", ["count": String(rating)]))
                         }
                     }
                 }.foregroundStyle(context.accentColor)
                 if feedback.type != "thumbs" {
-                    Button("Submit", action: submitSelected).buttonStyle(
+                    Button(strings("Submit"), action: submitSelected).buttonStyle(
                         FilledCapsuleButtonStyle(accentColor: context.accentColor)
                     ).disabled(selected == nil || pending)
                 }
-                if pending { ProgressView("Submitting your feedback…").font(.caption) }
+                if pending { ProgressView(strings("Submitting your feedback…")).font(.caption) }
                 if let error { Text(error).font(.caption).foregroundStyle(.red) }
             }
         }.templateCard()
-            .onAppear { submitted = context.presentation?.values(for: messageId + ":feedback")["submitted"] == "true" }
+            .onAppear {
+                submitted =
+                    context.presentation?.values(for: messageId + ":feedback")["submitted"] == "true"
+            }
     }
     private func option(_ value: Int, icon: String, label: String) -> some View {
         Button {
@@ -54,7 +60,9 @@ struct FeedbackRichTemplate: View {
         } label: {
             Label(label, systemImage: icon).frame(minHeight: 44)
         }
-        .buttonStyle(OutlinedPillButtonStyle(accentColor: context.accentColor, isSelected: selected == value)).disabled(
+        .buttonStyle(
+            OutlinedPillButtonStyle(accentColor: context.accentColor, isSelected: selected == value)
+        ).disabled(
             pending)
     }
     private func submitSelected() {
@@ -72,7 +80,7 @@ struct FeedbackRichTemplate: View {
                 }
                 submitted = true
                 context.presentation?.save(["submitted": "true"], for: messageId + ":feedback")
-            } catch { self.error = "Feedback could not be submitted. Please retry." }
+            } catch { self.error = strings("Feedback could not be submitted. Please retry.") }
         }
     }
 }
