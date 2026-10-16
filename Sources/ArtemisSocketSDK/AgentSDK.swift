@@ -70,11 +70,13 @@ public final class AgentSDK {
             runtimeUserContext: runtimeUserContext
         )
         let sdk = AgentSDK(config: config)
-        ArtemisLogger.info("AgentSDK initialized successfully", metadata: [
-            "environment": config.environment,
-            "endpoint": config.connection.endpoint,
-            "project_id": config.connection.projectId,
-        ])
+        ArtemisLogger.info(
+            "AgentSDK initialized successfully",
+            metadata: [
+                "environment": config.environment,
+                "endpoint": config.connection.endpoint,
+                "project_id": config.connection.projectId,
+            ])
         return sdk
     }
 
@@ -121,9 +123,11 @@ public final class AgentSDK {
     @discardableResult
     public func connect() async throws -> String {
         do {
-            ArtemisLogger.info("Connecting to Artemis...", metadata: [
-                "endpoint": config.connection.endpoint,
-            ])
+            ArtemisLogger.info(
+                "Connecting to Artemis...",
+                metadata: [
+                    "endpoint": config.connection.endpoint
+                ])
 
             try await sessionManager.connect()
 
@@ -185,6 +189,14 @@ public final class AgentSDK {
         }
 
         do {
+            if config.session.staleSessionRefreshMs > 0,
+                Date().timeIntervalSince(sessionManager.lastActivity) * 1000
+                    > Double(config.session.staleSessionRefreshMs)
+            {
+                sessionManager.disconnect()
+                try await sessionManager.connect()
+                throw AttachmentError("The connection was refreshed. Please retry your message.")
+            }
             return try await chatClient.send(
                 text: text,
                 metadata: metadata,
@@ -253,6 +265,28 @@ public final class AgentSDK {
         }
     }
 
+    public func getSessionScope() -> SDKSessionScope? { sessionManager.getScope() }
+    public func recordActivity() { sessionManager.noteActivity() }
+    public func sendUserPresence(isTyping: Bool) throws {
+        try sessionManager.send(
+            .raw([
+                "type": "user_presence", "event": isTyping ? "typing" : "stop_typing",
+                "sessionId": getSessionId() ?? "",
+            ]))
+    }
+    public func performAction(
+        _ actionId: String, value: String? = nil, formData: [String: String]? = nil,
+        renderId: String? = nil, displayText: String? = nil
+    ) async throws {
+        try await chatClient.performAction(
+            actionId: actionId, value: value, formData: formData, renderId: renderId, displayText: displayText)
+    }
+    public func submitAgentTransferSurvey(_ survey: AgentTransferSurvey, score: Int, comments: String? = nil)
+        async throws -> String
+    {
+        try await chatClient.submitAgentTransferSurvey(survey, score: score, comments: comments)
+    }
+
     /// All messages in the local store.
     public func getMessages() -> [Message] {
         chatClient.getMessages()
@@ -318,67 +352,37 @@ public final class AgentSDK {
 // MARK: - SessionManagerDelegate
 
 extension AgentSDK: SessionManagerDelegate {
-    nonisolated func sessionManagerDidConnect(_ manager: SessionManager) {
-        Task { @MainActor in
-            if let sessionId = manager.getSessionId() {
-                self.emitSDK(.connected(sessionId: sessionId))
-            }
-            self.chatClient.resendPending()
-            self.chatClient.hydratePersistedHistory()
-        }
+    func sessionManagerDidConnect(_ manager: SessionManager) {
+        if let id = manager.getSessionId() { emitSDK(.connected(sessionId: id)) }
+        chatClient.clearPending()
+        chatClient.hydratePersistedHistory()
     }
-
-    nonisolated func sessionManagerDidDisconnect(_ manager: SessionManager, reason: String?) {
-        Task { @MainActor in
-            self.emitSDK(.disconnected(reason: reason))
-        }
+    func sessionManagerDidDisconnect(_ manager: SessionManager, reason: String?) {
+        chatClient.connectionLost()
+        emitSDK(.disconnected(reason: reason))
     }
-
-    nonisolated func sessionManager(_ manager: SessionManager, didReceive message: TransportServerMessage) {
-        Task { @MainActor in
-            self.chatClient.handleServerMessage(message)
+    func sessionManager(_ manager: SessionManager, didReceive message: TransportServerMessage) {
+        if message.type == "idle_timeout" {
+            emitSDK(.idleTimeout(timeout: Double(message.raw["timeoutMs"] as? Int ?? 0) / 1000))
         }
+        chatClient.handleServerMessage(message)
     }
-
-    nonisolated func sessionManager(_ manager: SessionManager, didChangeState state: ConnectionState) {
-        Task { @MainActor in
-            if state == .reconnecting {
-                let maxAttempts = self.config.websocket.reconnection.maxAttempts
-                self.emitSDK(.reconnecting(attempt: 1, maxAttempts: maxAttempts))
-            }
-        }
+    func sessionManager(_ manager: SessionManager, didChangeState state: ConnectionState) {}
+    func sessionManager(_ manager: SessionManager, didEncounterError error: Error) {
+        emitSDK(.error(error: unwrapStageError(error), code: errorCode(for: error)))
     }
-
-    nonisolated func sessionManager(_ manager: SessionManager, didEncounterError error: Error) {
-        Task { @MainActor in
-            self.emitSDK(.error(error: self.unwrapStageError(error), code: self.errorCode(for: error)))
-        }
+    func sessionManagerDidStartReconnecting(_ manager: SessionManager, attempt: Int, maxAttempts: Int) {
+        emitSDK(.reconnecting(attempt: attempt, maxAttempts: maxAttempts))
     }
-
-    nonisolated func sessionManagerDidStartReconnecting(
-        _ manager: SessionManager,
-        attempt: Int,
-        maxAttempts: Int
-    ) {
-        Task { @MainActor in
-            self.emitSDK(.reconnecting(attempt: attempt, maxAttempts: maxAttempts))
-        }
+    func sessionManager(_ manager: SessionManager, didUpdateScope scope: SDKSessionScope) {
+        emitSDK(.sessionScopeChanged(scope))
     }
 }
 
-// MARK: - ChatClientDelegate
-
 extension AgentSDK: ChatClientDelegate {
-    nonisolated func chatClient(_ client: ChatClient, didReceive event: ChatEvent) {
-        Task { @MainActor in
-            self.emitChat(event)
-        }
-    }
-
-    nonisolated func chatClient(_ client: ChatClient, didFailHistoryHydration error: Error) {
-        Task { @MainActor in
-            self.emitSDK(.error(error: error, code: .historyFetch))
-        }
+    func chatClient(_ client: ChatClient, didReceive event: ChatEvent) { emitChat(event) }
+    func chatClient(_ client: ChatClient, didFailHistoryHydration error: Error) {
+        emitSDK(.error(error: error, code: .historyFetch))
     }
 }
 
@@ -398,40 +402,48 @@ public enum AgentSDKError: Error, LocalizedError {
 
 // MARK: - Session-scoped attachments
 
-public extension AgentSDK {
+extension AgentSDK {
     /// Upload using the same multipart contract as the web SDK. Send the returned ID with sendMessage.
-    func uploadAttachment(fileURL: URL, contentType: String = "application/octet-stream") async throws -> String {
-        guard isConnected(), let sessionId = getSessionId(), !sessionId.isEmpty else { throw AgentSDKError.notConnected }
+    public func uploadAttachment(
+        fileURL: URL, contentType: String = "application/octet-stream", progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> String {
+        guard isConnected(), let sessionId = getSessionId(), !sessionId.isEmpty else {
+            throw AgentSDKError.notConnected
+        }
         let token = try await sessionManager.getAuthToken()
         guard isConnected(), getSessionId() == sessionId else { throw AgentSDKError.notConnected }
         let endpoint = sessionManager.getEndpoint()
         let projectId = sessionManager.getProjectId()
-        return try await AttachmentHTTP.upload(fileURL: fileURL, contentType: contentType, endpoint: endpoint,
-                                               projectId: projectId, sessionId: sessionId, token: token)
+        let id = try await AttachmentHTTP.upload(
+            fileURL: fileURL, contentType: contentType, endpoint: endpoint,
+            projectId: projectId, sessionId: sessionId, token: token,
+            maxFileSizeBytes: config.attachments.maxFileSizeBytes, progress: progress)
+        guard isConnected(), getSessionId() == sessionId else { throw AgentSDKError.notConnected }
+        return id
     }
 
     /// Resolve a fresh URL on each open; signed download URLs are never persisted or sent in chat frames.
-    func resolveAttachmentDownloadURL(attachmentId: String) async throws -> URL {
-        guard isConnected(), let sessionId = getSessionId(), !sessionId.isEmpty else { throw AgentSDKError.notConnected }
+    public func resolveAttachmentDownloadURL(attachmentId: String) async throws -> URL {
+        guard isConnected(), let sessionId = getSessionId(), !sessionId.isEmpty else {
+            throw AgentSDKError.notConnected
+        }
         let token = try await sessionManager.getAuthToken()
         guard isConnected(), getSessionId() == sessionId else { throw AgentSDKError.notConnected }
-        var request = URLRequest(url: try AttachmentHTTP.url(endpoint: sessionManager.getEndpoint(),
-            projectId: sessionManager.getProjectId(), sessionId: sessionId, attachmentId: attachmentId))
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue(token, forHTTPHeaderField: "X-SDK-Token")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let json = try AttachmentHTTP.response(data, response)
-        let value = json["url"] as? String ?? (json["data"] as? [String: Any])?["url"] as? String
-        guard let value, let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else {
-            throw AttachmentError("Attachment response did not include a valid download URL")
-        }
+        let url = try await AttachmentHTTP.resolve(
+            endpoint: sessionManager.getEndpoint(), projectId: sessionManager.getProjectId(),
+            sessionId: sessionId, attachmentId: attachmentId, token: token)
+        guard isConnected(), getSessionId() == sessionId else { throw AgentSDKError.notConnected }
         return url
     }
 }
 
 public struct AttachmentError: Error, LocalizedError {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    public let status: Int?
+    public init(_ message: String, status: Int? = nil) {
+        self.message = message
+        self.status = status
+    }
     public var errorDescription: String? { message }
 }
 
@@ -449,10 +461,14 @@ enum AttachmentHTTP {
         return url
     }
 
-    static func multipartFile(source: URL, contentType: String, boundary: String) throws -> URL {
+    static func multipartFile(
+        source: URL, contentType: String, boundary: String, maxFileSizeBytes: Int64 = 20 * 1024 * 1024
+    ) throws -> URL {
         guard source.isFileURL else { throw AttachmentError("Select a local file to upload") }
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw AttachmentError("Could not prepare attachment") }
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+            throw AttachmentError("Could not prepare attachment")
+        }
         do {
             let input = try FileHandle(forReadingFrom: source)
             defer { try? input.close() }
@@ -461,13 +477,20 @@ enum AttachmentHTTP {
             let filename = source.lastPathComponent.replacingOccurrences(of: "\r", with: "_")
                 .replacingOccurrences(of: "\n", with: "_").replacingOccurrences(of: "\"", with: "_")
                 .replacingOccurrences(of: "\\", with: "_")
-            let mime = contentType.contains("\r") || contentType.contains("\n") || contentType.isEmpty ? "application/octet-stream" : contentType
-            let header = "--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n"
+            let mime =
+                contentType.contains("\r") || contentType.contains("\n") || contentType.isEmpty
+                ? "application/octet-stream" : contentType
+            let header =
+                "--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n"
             try output.write(contentsOf: Data(header.utf8))
+            var count: Int64 = 0
             while let chunk = try input.read(upToCount: 64 * 1024), !chunk.isEmpty {
+                count += Int64(chunk.count)
+                guard count <= maxFileSizeBytes else { throw AttachmentError("File exceeds the upload size limit") }
                 try Task.checkCancellation()
                 try output.write(contentsOf: chunk)
             }
+            guard count > 0 else { throw AttachmentError("Empty files cannot be uploaded") }
             try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
             return destination
         } catch {
@@ -479,28 +502,92 @@ enum AttachmentHTTP {
     static func response(_ data: Data, _ response: URLResponse) throws -> [String: Any] {
         guard let http = response as? HTTPURLResponse else { throw AttachmentError("Invalid attachment response") }
         guard (200..<300).contains(http.statusCode) else {
-            let detail = String(data: data.prefix(512), encoding: .utf8) ?? "Request failed"
-            throw AttachmentError("Attachment request failed (\(http.statusCode)): \(detail)")
+            throw AttachmentError(
+                http.statusCode == 409
+                    ? "Attachment is not ready yet. Please retry." : "Attachment request failed (\(http.statusCode))",
+                status: http.statusCode)
         }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw AttachmentError("Invalid attachment response") }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AttachmentError("Invalid attachment response")
+        }
         return json
     }
 
-    static func upload(fileURL: URL, contentType: String, endpoint: String, projectId: String, sessionId: String,
-                       token: String, urlSession: URLSession = .shared) async throws -> String {
+    static func resolve(
+        endpoint: String, projectId: String, sessionId: String, attachmentId: String,
+        token: String, urlSession: URLSession = .shared
+    ) async throws -> URL {
+        let original = try url(
+            endpoint: endpoint, projectId: projectId, sessionId: sessionId, attachmentId: attachmentId)
+        var request = URLRequest(url: original)
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue(token, forHTTPHeaderField: "X-SDK-Token")
+        let delegate = AttachmentRequestDelegate(progress: nil)
+        let (data, response) = try await urlSession.data(for: request, delegate: delegate)
+        let json = try self.response(data, response)
+        var value = json["url"] as? String ?? (json["data"] as? [String: Any])?["url"] as? String
+        if value?.lowercased().hasPrefix("file:") == true {
+            var components = URLComponents(
+                url: original.deletingLastPathComponent().appendingPathComponent("delivery-url"),
+                resolvingAgainstBaseURL: false)!
+            components.query = nil
+            request.url = components.url
+            request.httpMethod = "POST"
+            request.httpBody = Data("{}".utf8)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let (minted, response) = try await urlSession.data(for: request, delegate: delegate)
+            let body = try self.response(minted, response)
+            let download = (body["data"] as? [String: Any])?["download"] as? [String: Any]
+            value = download?["available"] as? Bool == true ? download?["url"] as? String : nil
+        }
+        guard let value, let resolved = MessageNormalizer.safeWebURL(value, relativeTo: endpoint + "/") else {
+            throw AttachmentError("A secure download link is unavailable. Please retry.")
+        }
+        return resolved
+    }
+
+    static func upload(
+        fileURL: URL, contentType: String, endpoint: String, projectId: String, sessionId: String,
+        token: String, urlSession: URLSession = .shared, maxFileSizeBytes: Int64 = 20 * 1024 * 1024,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> String {
         let boundary = "Artemis-\(UUID().uuidString)"
-        let body = try multipartFile(source: fileURL, contentType: contentType, boundary: boundary)
+        let preparation = Task.detached {
+            try multipartFile(
+                source: fileURL, contentType: contentType, boundary: boundary, maxFileSizeBytes: maxFileSizeBytes)
+        }
+        let body = try await withTaskCancellationHandler(
+            operation: { try await preparation.value }, onCancel: { preparation.cancel() })
         defer { try? FileManager.default.removeItem(at: body) }
         try Task.checkCancellation()
         var request = URLRequest(url: try url(endpoint: endpoint, projectId: projectId, sessionId: sessionId))
         request.httpMethod = "POST"
+        request.timeoutInterval = 120
         request.setValue(token, forHTTPHeaderField: "X-SDK-Token")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let (data, response) = try await urlSession.upload(for: request, fromFile: body)
+        let delegate = AttachmentRequestDelegate(progress: progress)
+        let (data, response) = try await urlSession.upload(for: request, fromFile: body, delegate: delegate)
         let json = try self.response(data, response)
-        guard let id = json["attachmentId"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let id = json["attachmentId"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
             throw AttachmentError("Upload response did not include an attachment ID")
         }
         return id
     }
+}
+
+private final class AttachmentRequestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let progress: (@Sendable (Double) -> Void)?
+    init(progress: (@Sendable (Double) -> Void)?) { self.progress = progress }
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64, totalBytesExpectedToSend: Int64
+    ) {
+        if totalBytesExpectedToSend > 0 { progress?(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))) }
+    }
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) { completionHandler(nil) }
 }

@@ -12,7 +12,8 @@ public enum SDKConfigurationLoader {
         environmentOverrideURL: URL? = nil
     ) throws -> SDKConfiguration {
         let baseConfig = try loadFile(url)
-        let env = environment
+        let env =
+            environment
             ?? (baseConfig["artemis_sdk"] as? [String: Any])?["environment"] as? String
             ?? "dev"
 
@@ -67,7 +68,8 @@ public enum SDKConfigurationLoader {
             throw SDKConfigurationError(message: "Failed to parse YAML configuration")
         }
         let baseConfig = yamlToDictionary(yamlObject)
-        let env = environment
+        let env =
+            environment
             ?? (baseConfig["artemis_sdk"] as? [String: Any])?["environment"] as? String
             ?? "dev"
 
@@ -76,7 +78,7 @@ public enum SDKConfigurationLoader {
         }
 
         var config = SDKConfigurationParser.parse(from: artemisSDK)
-        _ = env // environment-specific overrides require a second file in bundle workflows
+        _ = env  // environment-specific overrides require a second file in bundle workflows
         try validate(config)
         if let runtimeUserContext {
             config = config.copyWithUserContext(runtimeUserContext)
@@ -160,7 +162,8 @@ public enum SDKConfigurationLoader {
         var result = base
         for (key, value) in override {
             if let overrideMap = value as? [String: Any],
-               let baseMap = result[key] as? [String: Any] {
+                let baseMap = result[key] as? [String: Any]
+            {
                 result[key] = mergeConfigs(base: baseMap, override: overrideMap)
             } else {
                 result[key] = value
@@ -169,7 +172,7 @@ public enum SDKConfigurationLoader {
         return result
     }
 
-    private static func validate(_ config: SDKConfiguration) throws {
+    static func validate(_ config: SDKConfiguration) throws {
         var errors: [String] = []
 
         if config.connection.projectId.isEmpty {
@@ -178,22 +181,58 @@ public enum SDKConfigurationLoader {
         if config.connection.endpoint.isEmpty {
             errors.append("connection.endpoint is required and cannot be empty")
         }
-        if !config.connection.endpoint.hasPrefix("http://") &&
-            !config.connection.endpoint.hasPrefix("https://") {
+        if !config.connection.endpoint.hasPrefix("http://") && !config.connection.endpoint.hasPrefix("https://") {
             errors.append("connection.endpoint must start with http:// or https://")
         }
-        if config.connection.apiKey == nil && config.connection.bootstrapToken == nil {
-            errors.append("Either connection.api_key or connection.bootstrap_token is required")
+        let credentials =
+            [config.connection.apiKey, config.connection.bootstrapToken].compactMap { $0 }.filter {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }.count
+            + (config.connection.bootstrapTokenProvider == nil ? 0 : 1)
+        if credentials != 1 {
+            errors.append("Provide exactly one API key, bootstrap token or bootstrap token provider")
         }
-        if config.connection.apiKey != nil && config.connection.bootstrapToken != nil {
-            errors.append("Cannot specify both connection.api_key and connection.bootstrap_token")
+        let explicitChannel = [config.channel?.channelId, config.channel?.channelName, config.channel?.deploymentSlug]
+            .compactMap { $0 }.contains { !$0.isEmpty }
+        if config.connection.apiKey == nil
+            && (explicitChannel || config.userContext != nil || config.connection.clientSessionIdentifier)
+        {
+            errors.append(
+                "Hosted bootstrap owns channel and user scope; omit channel, user context and client session identifier"
+            )
+        }
+        if let context = config.userContext {
+            let attributes = context.customAttributes?.mapValues(\.value) ?? [:]
+            let raw: [String: Any] = ["userId": context.userId ?? "", "customAttributes": attributes]
+            func validPrimitive(_ value: Any) -> Bool {
+                if value is NSNull { return true }
+                if let string = value as? String { return string.count <= 512 }
+                if let number = value as? NSNumber { return number.doubleValue.isFinite }
+                return false
+            }
+            let valid =
+                (context.userId?.trimmingCharacters(in: .whitespacesAndNewlines).count ?? 0) <= 200
+                && attributes.count <= 32
+                && attributes.allSatisfy { key, value in
+                    guard !key.isEmpty, key.count <= 128 else { return false }
+                    if let items = value as? [Any] { return items.count <= 16 && items.allSatisfy(validPrimitive) }
+                    return validPrimitive(value)
+                }
+            let size = (try? JSONSerialization.data(withJSONObject: raw).count) ?? Int.max
+            if !valid || !JSONSerialization.isValidJSONObject(raw) || size > 4096 {
+                errors.append(
+                    "User context requires bounded primitives/primitive arrays and must fit within 4096 bytes")
+            }
+        }
+        if let url = URLComponents(string: config.connection.endpoint),
+            url.host == nil || url.user != nil || url.password != nil || url.query != nil || url.fragment != nil
+        {
+            errors.append("Endpoint must have a host and no credentials, query or fragment")
         }
         if config.environment == "prod" && config.connection.endpoint.hasPrefix("http://") {
             errors.append("Production environment must use HTTPS endpoint")
         }
-        if config.voice.enabled &&
-            config.voice.mode != "pipeline" &&
-            config.voice.mode != "realtime" {
+        if config.voice.enabled && config.voice.mode != "pipeline" && config.voice.mode != "realtime" {
             errors.append("voice.mode must be either \"pipeline\" or \"realtime\"")
         }
         if config.voice.enabled && config.voice.sampleRate <= 0 {

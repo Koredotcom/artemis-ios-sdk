@@ -1,7 +1,11 @@
-import Foundation
+#if canImport(ArtemisSocketSDK)
 import ArtemisSocketSDK
+#endif
+import Foundation
 
 public struct CarouselButton: Sendable {
+    public let value: String?
+    public let url: String?
     public let id: String
     public let type: String
     public let label: String
@@ -136,6 +140,7 @@ public struct ActionOption: Sendable, Identifiable {
 }
 
 public struct ActionElement: Sendable, Identifiable {
+    public let url: String?
     public let id: String
     public let type: String
     public let label: String
@@ -152,6 +157,7 @@ public struct ActionSet: Sendable {
     public let submitLabel: String?
     public let submitId: String?
     public let renderId: String?
+    public let submittedActionId: String?
 }
 
 public struct ChannelFallbackItem: Sendable, Identifiable {
@@ -187,7 +193,7 @@ public struct RichContent: Sendable {
             ("adaptive_card", adaptiveCard),
             ("slack", slack),
             ("ag_ui", agUI),
-            ("whatsapp", whatsapp)
+            ("whatsapp", whatsapp),
         ].compactMap { type, value in
             guard let trimmed = value?.trimmed, !trimmed.isEmpty else { return nil }
             return ChannelFallbackItem(type: type, payload: trimmed)
@@ -200,24 +206,24 @@ public struct RichContent: Sendable {
     }
 }
 
-public extension Message {
-    var rawRichContent: [String: Any]? {
+extension Message {
+    public var rawRichContent: [String: Any]? {
         guard let metadata else { return nil }
         if let direct = RichContentParser.dictionary(metadata["richContent"]?.value) { return direct }
         if let direct = RichContentParser.dictionary(metadata["rich_content"]?.value) { return direct }
         return nil
     }
 
-    var richContent: RichContent? {
+    public var richContent: RichContent? {
         rawRichContent.flatMap(RichContentParser.parseRichContent)
     }
 
-    var rawActions: [String: Any]? {
+    public var rawActions: [String: Any]? {
         guard let metadata else { return nil }
         return RichContentParser.dictionary(metadata["actions"]?.value)
     }
 
-    var actions: ActionSet? {
+    public var actions: ActionSet? {
         rawActions.flatMap(RichContentParser.parseActions)
     }
 }
@@ -226,7 +232,7 @@ enum RichContentParser {
     static let knownKeys: Set<String> = [
         "markdown", "adaptive_card", "html", "slack", "ag_ui", "whatsapp",
         "carousel", "quick_replies", "image", "video", "audio", "file",
-        "list", "kpi", "table", "chart", "form", "progress", "feedback"
+        "list", "kpi", "table", "chart", "form", "progress", "feedback",
     ]
 
     static func parseRichContent(_ json: [String: Any]) -> RichContent? {
@@ -242,7 +248,8 @@ enum RichContentParser {
             agUI: string(json["ag_ui"]),
             whatsapp: string(json["whatsapp"]),
             carousel: dictionary(json["carousel"]).flatMap(parseCarousel),
-            quickReplies: array(json["quick_replies"])?.compactMap { dictionary($0).flatMap(parseQuickReply) }.nilIfEmpty,
+            quickReplies: array(json["quick_replies"])?.compactMap { dictionary($0).flatMap(parseQuickReply) }
+                .nilIfEmpty,
             image: dictionary(json["image"]).flatMap(parseMedia),
             video: dictionary(json["video"]).flatMap(parseMedia),
             audio: dictionary(json["audio"]).flatMap(parseMedia),
@@ -260,122 +267,157 @@ enum RichContentParser {
     }
 
     static func parseActions(_ json: [String: Any]) -> ActionSet? {
-        let elements = array(json["elements"])?.compactMap { raw -> ActionElement? in
-            guard let item = dictionary(raw),
-                  let id = string(item["id"]), !id.isEmpty,
-                  let label = string(item["label"]), !label.isEmpty else { return nil }
-            return ActionElement(
-                id: id,
-                type: normalizeActionType(string(item["type"])),
-                label: label,
-                value: string(item["value"] ?? item["payload"] ?? item["url"]),
-                description: string(item["description"]),
-                options: parseOptions(item["options"]),
-                inputType: string(item["input_type"]),
-                placeholder: string(item["placeholder"]),
-                required: bool(item["required"]) ?? false
-            )
-        } ?? []
+        let elements =
+            array(json["elements"])?.compactMap { raw -> ActionElement? in
+                guard let item = dictionary(raw),
+                    let id = string(item["id"]), !id.isEmpty,
+                    let label = string(item["label"]), !label.isEmpty
+                else { return nil }
+                return ActionElement(
+                    url: string(item["url"]),
+                    id: id,
+                    type: normalizeActionType(string(item["type"])),
+                    label: label,
+                    value: string(item["value"] ?? item["payload"] ?? item["url"]),
+                    description: string(item["description"]),
+                    options: parseOptions(item["options"]),
+                    inputType: string(item["input_type"]),
+                    placeholder: string(item["placeholder"]),
+                    required: bool(item["required"]) ?? false
+                )
+            } ?? []
         guard !elements.isEmpty else { return nil }
         return ActionSet(
             elements: elements,
             submitLabel: string(json["submit_label"]),
             submitId: string(json["submit_id"]),
-            renderId: string(json["renderId"] ?? json["render_id"])
+            renderId: string(json["renderId"] ?? json["render_id"]),
+            submittedActionId: dictionary(json["submitted"]).flatMap { string($0["actionId"]) }
         )
     }
 
     private static func parseCarousel(_ json: [String: Any]) -> CarouselTemplate? {
-        let cards = array(json["cards"])?.compactMap { raw -> CarouselItem? in
-            guard let item = dictionary(raw), let title = string(item["title"]), !title.isEmpty else { return nil }
-            let buttons = array(item["buttons"])?.compactMap { buttonRaw -> CarouselButton? in
-                guard let button = dictionary(buttonRaw), let label = string(button["label"]), !label.isEmpty else { return nil }
-                return CarouselButton(
-                    id: string(button["id"]) ?? UUID().uuidString,
-                    type: string(button["type"]) ?? "button",
-                    label: label,
-                    options: (array(button["options"]) ?? []).compactMap { dictionary($0)?.sendableDictionary }
+        let cards =
+            array(json["cards"])?.compactMap { raw -> CarouselItem? in
+                guard let item = dictionary(raw), let title = string(item["title"]), !title.isEmpty else { return nil }
+                let buttons =
+                    array(item["buttons"])?.compactMap { buttonRaw -> CarouselButton? in
+                        guard let button = dictionary(buttonRaw), let label = string(button["label"]), !label.isEmpty
+                        else { return nil }
+                        return CarouselButton(
+                            value: string(button["value"] ?? button["payload"]), url: string(button["url"]),
+                            id: string(button["id"]) ?? UUID().uuidString,
+                            type: string(button["type"]) ?? "button",
+                            label: label,
+                            options: (array(button["options"]) ?? []).compactMap { dictionary($0)?.sendableDictionary }
+                        )
+                    } ?? []
+                return CarouselItem(
+                    title: title,
+                    subtitle: string(item["subtitle"] ?? item["description"]),
+                    imageURL: string(item["image_url"] ?? item["imageUrl"]),
+                    defaultActionURL: string(item["default_action_url"] ?? item["defaultActionUrl"]),
+                    buttons: buttons
                 )
             } ?? []
-            return CarouselItem(
-                title: title,
-                subtitle: string(item["subtitle"] ?? item["description"]),
-                imageURL: string(item["image_url"] ?? item["imageUrl"]),
-                defaultActionURL: string(item["default_action_url"] ?? item["defaultActionUrl"]),
-                buttons: buttons
-            )
-        } ?? []
         return cards.isEmpty ? nil : CarouselTemplate(cards: cards)
     }
 
     private static func parseQuickReply(_ json: [String: Any]) -> QuickReply? {
         guard let label = string(json["label"]), !label.isEmpty else { return nil }
-        return QuickReply(id: string(json["id"]) ?? label, label: label, iconURL: string(json["icon_url"] ?? json["iconUrl"]))
+        return QuickReply(
+            id: string(json["id"]) ?? label, label: label, iconURL: string(json["icon_url"] ?? json["iconUrl"]))
     }
 
     private static func parseMedia(_ json: [String: Any]) -> MediaContent? {
         guard let url = string(json["url"]), !url.trimmed.isEmpty else { return nil }
-        return MediaContent(url: url, alt: string(json["alt"]), thumbnailURL: string(json["thumbnail_url"] ?? json["thumbnailUrl"]), caption: string(json["caption"]))
+        return MediaContent(
+            url: url, alt: string(json["alt"]), thumbnailURL: string(json["thumbnail_url"] ?? json["thumbnailUrl"]),
+            caption: string(json["caption"]))
     }
 
     private static func parseFile(_ json: [String: Any]) -> FileContent? {
         guard let url = string(json["url"]), !url.trimmed.isEmpty else { return nil }
-        return FileContent(url: url, filename: string(json["filename"]) ?? URL(string: url)?.lastPathComponent ?? "Attachment", sizeBytes: int(json["size_bytes"] ?? json["sizeBytes"]), mimeType: string(json["mime_type"] ?? json["mimeType"]))
+        return FileContent(
+            url: url, filename: string(json["filename"]) ?? URL(string: url)?.lastPathComponent ?? "Attachment",
+            sizeBytes: int(json["size_bytes"] ?? json["sizeBytes"]),
+            mimeType: string(json["mime_type"] ?? json["mimeType"]))
     }
 
     private static func parseList(_ json: [String: Any]) -> ListTemplate? {
-        let items = array(json["items"])?.compactMap { raw -> ListTemplateItem? in
-            guard let item = dictionary(raw), let title = string(item["title"]), !title.isEmpty else { return nil }
-            return ListTemplateItem(title: title, subtitle: string(item["subtitle"] ?? item["description"]), imageURL: string(item["image_url"] ?? item["imageUrl"]), defaultActionURL: string(item["default_action_url"] ?? item["defaultActionUrl"]))
-        } ?? []
+        let items =
+            array(json["items"])?.compactMap { raw -> ListTemplateItem? in
+                guard let item = dictionary(raw), let title = string(item["title"]), !title.isEmpty else { return nil }
+                return ListTemplateItem(
+                    title: title, subtitle: string(item["subtitle"] ?? item["description"]),
+                    imageURL: string(item["image_url"] ?? item["imageUrl"]),
+                    defaultActionURL: string(item["default_action_url"] ?? item["defaultActionUrl"]))
+            } ?? []
         return items.isEmpty ? nil : ListTemplate(title: string(json["title"]), items: items)
     }
 
     private static func parseKPI(_ json: [String: Any]) -> KPITemplate? {
         guard let label = string(json["label"]), !label.trimmed.isEmpty else { return nil }
-        return KPITemplate(label: label, value: json["value"].map(AnySendable.init), unit: string(json["unit"]), trend: string(json["trend"]), iconURL: string(json["icon_url"] ?? json["iconUrl"]))
+        return KPITemplate(
+            label: label, value: json["value"].map(AnySendable.init), unit: string(json["unit"]),
+            trend: string(json["trend"]), iconURL: string(json["icon_url"] ?? json["iconUrl"]))
     }
 
     private static func parseTable(_ json: [String: Any]) -> TableTemplate? {
-        let columns = array(json["columns"])?.compactMap { raw -> TableColumn? in
-            guard let item = dictionary(raw) else { return nil }
-            let key = string(item["key"]) ?? ""
-            let header = string(item["header"]) ?? key
-            guard !key.isEmpty || !header.isEmpty else { return nil }
-            return TableColumn(id: key.isEmpty ? header : key, key: key, header: header, align: string(item["align"]))
-        } ?? []
+        let columns =
+            array(json["columns"])?.compactMap { raw -> TableColumn? in
+                guard let item = dictionary(raw) else { return nil }
+                let key = string(item["key"]) ?? ""
+                let header = string(item["header"]) ?? key
+                guard !key.isEmpty || !header.isEmpty else { return nil }
+                return TableColumn(
+                    id: key.isEmpty ? header : key, key: key, header: header, align: string(item["align"]))
+            } ?? []
         let rows = array(json["rows"])?.compactMap { dictionary($0)?.sendableDictionary } ?? []
         guard !columns.isEmpty, !rows.isEmpty else { return nil }
-        return TableTemplate(columns: columns, rows: rows, maxVisibleRows: int(json["max_visible_rows"] ?? json["maxVisibleRows"]))
+        return TableTemplate(
+            columns: columns, rows: rows, maxVisibleRows: int(json["max_visible_rows"] ?? json["maxVisibleRows"]))
     }
 
     private static func parseChart(_ json: [String: Any]) -> ChartTemplate? {
-        let points = array(json["data"])?.compactMap { raw -> ChartDataPoint? in
-            guard let item = dictionary(raw) else { return nil }
-            return ChartDataPoint(label: string(item["label"]) ?? "", value: double(item["value"]) ?? 0, color: string(item["color"]))
-        } ?? []
-        return points.isEmpty ? nil : ChartTemplate(type: string(json["type"]) ?? "bar", title: string(json["title"]), data: Array(points.prefix(100)))
+        let points =
+            array(json["data"])?.compactMap { raw -> ChartDataPoint? in
+                guard let item = dictionary(raw) else { return nil }
+                return ChartDataPoint(
+                    label: string(item["label"]) ?? "", value: double(item["value"]) ?? 0, color: string(item["color"]))
+            } ?? []
+        return points.isEmpty
+            ? nil
+            : ChartTemplate(
+                type: string(json["type"]) ?? "bar", title: string(json["title"]), data: Array(points.prefix(100)))
     }
 
     private static func parseForm(_ json: [String: Any]) -> FormTemplate? {
-        let fields = array(json["fields"])?.compactMap { raw -> FormTemplateField? in
-            guard let item = dictionary(raw), let id = string(item["id"]), !id.isEmpty else { return nil }
-            return FormTemplateField(
-                id: id,
-                type: string(item["type"]) ?? "input",
-                label: string(item["label"]) ?? id,
-                value: string(item["value"]),
-                options: parseOptions(item["options"]).map { FormFieldOption(id: $0.id, label: $0.label, description: $0.description) },
-                inputType: string(item["input_type"]),
-                placeholder: string(item["placeholder"]),
-                required: bool(item["required"]) ?? false
-            )
-        } ?? []
-        return fields.isEmpty ? nil : FormTemplate(title: string(json["title"]), fields: fields, submitLabel: string(json["submit_label"]))
+        let fields =
+            array(json["fields"])?.compactMap { raw -> FormTemplateField? in
+                guard let item = dictionary(raw), let id = string(item["id"]), !id.isEmpty else { return nil }
+                return FormTemplateField(
+                    id: id,
+                    type: string(item["type"]) ?? "input",
+                    label: string(item["label"]) ?? id,
+                    value: string(item["value"]),
+                    options: parseOptions(item["options"]).map {
+                        FormFieldOption(id: $0.id, label: $0.label, description: $0.description)
+                    },
+                    inputType: string(item["input_type"]),
+                    placeholder: string(item["placeholder"]),
+                    required: bool(item["required"]) ?? false
+                )
+            } ?? []
+        return fields.isEmpty
+            ? nil
+            : FormTemplate(title: string(json["title"]), fields: fields, submitLabel: string(json["submit_label"]))
     }
 
     private static func parseProgress(_ json: [String: Any]) -> ProgressTemplate {
-        ProgressTemplate(label: string(json["label"]), value: double(json["value"]) ?? 0, max: double(json["max"]) ?? 100, variant: string(json["variant"]) ?? "bar")
+        ProgressTemplate(
+            label: string(json["label"]), value: double(json["value"]) ?? 0, max: double(json["max"]) ?? 100,
+            variant: string(json["variant"]) ?? "bar")
     }
 
     private static func parseFeedback(_ json: [String: Any]) -> FeedbackTemplate? {
@@ -395,22 +437,22 @@ enum RichContentParser {
     private static func hasRenderableContent(_ content: RichContent) -> Bool {
         [
             content.markdown, content.adaptiveCard, content.html, content.slack,
-            content.agUI, content.whatsapp
+            content.agUI, content.whatsapp,
         ].contains { !($0?.trimmed.isEmpty ?? true) }
-        || content.carousel != nil
-        || !(content.quickReplies?.isEmpty ?? true)
-        || content.image != nil
-        || content.video != nil
-        || content.audio != nil
-        || content.file != nil
-        || content.list != nil
-        || content.kpi != nil
-        || content.table != nil
-        || content.chart != nil
-        || content.form != nil
-        || content.progress != nil
-        || content.feedback != nil
-        || content.extensions.values.contains { hasRenderableValue($0.value) }
+            || content.carousel != nil
+            || !(content.quickReplies?.isEmpty ?? true)
+            || content.image != nil
+            || content.video != nil
+            || content.audio != nil
+            || content.file != nil
+            || content.list != nil
+            || content.kpi != nil
+            || content.table != nil
+            || content.chart != nil
+            || content.form != nil
+            || content.progress != nil
+            || content.feedback != nil
+            || content.extensions.values.contains { hasRenderableValue($0.value) }
     }
 
     static func hasRenderableValue(_ value: Any) -> Bool {
@@ -479,14 +521,14 @@ enum RichContentParser {
     }
 }
 
-private extension Dictionary where Key == String, Value == Any {
-    var sendableDictionary: [String: AnySendable] { mapValues(AnySendable.init) }
+extension Dictionary where Key == String, Value == Any {
+    fileprivate var sendableDictionary: [String: AnySendable] { mapValues(AnySendable.init) }
 }
 
-private extension Array {
-    var nilIfEmpty: [Element]? { isEmpty ? nil : self }
+extension Array {
+    fileprivate var nilIfEmpty: [Element]? { isEmpty ? nil : self }
 }
 
-private extension String {
-    var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+extension String {
+    fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
 }

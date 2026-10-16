@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ArtemisSocketSDK)
 import ArtemisSocketSDK
+#endif
 
 struct TableRichTemplate: View {
     let table: TableTemplate

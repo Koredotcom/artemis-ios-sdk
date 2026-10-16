@@ -1,703 +1,621 @@
 import Foundation
 
-protocol ChatClientDelegate: AnyObject {
+@MainActor protocol ChatClientDelegate: AnyObject {
     func chatClient(_ client: ChatClient, didReceive event: ChatEvent)
     func chatClient(_ client: ChatClient, didFailHistoryHydration error: Error)
 }
 
-/// Chat client backed by the WebSocket session transport.
-final class ChatClient {
-    private let sessionManager: SessionManager
+/// Owns transcript state independently of its SwiftUI presentation.
+@MainActor final class ChatClient {
+    private let sessionManager: ChatSession
     private let config: SDKConfiguration
-
+    private let httpSession: URLSession
     private var messages: [Message] = []
-    private var messageIds = Set<String>()
-    private var isTyping = false
-    private var streamingBuffers: [String: String] = [:]
     private var customData: [String: Any] = [:]
-    private var inFlight: [PendingMessage] = []
     private var pendingFeedback: [String: PendingFeedback] = [:]
-
-    private var historyHydrationTask: Task<Void, Never>?
-    private var historyHydrationSessionId: String?
-    private var historyHydrationGeneration = 0
-
+    private var pendingSurveys: [String: PendingFeedback] = [:]
+    private var historyTask: Task<Void, Never>?
+    private var historyGeneration = 0
+    private var currentSessionId: String?
+    private var redaction = false
+    private var parkedRenders: [String: (String, Bool)] = [:]
+    private var cancelled: [String] = []
+    private var activeResponse: String?
+    private var activeRequest: String?
+    private var lastTerminalActivity = Date.distantPast
+    private var transferStatus: AgentTransferStatus = .none
+    private var transferSessionId: String?
+    private var lastTransferTransition = Date.distantPast
+    private var transferRevision = 0
+    private var activityText: String?
+    private var pendingActionRenders = Set<String>()
     weak var delegate: ChatClientDelegate?
 
-    init(sessionManager: SessionManager, config: SDKConfiguration) {
+    init(sessionManager: ChatSession, config: SDKConfiguration, httpSession: URLSession = .shared) {
         self.sessionManager = sessionManager
         self.config = config
+        self.httpSession = httpSession
     }
+    var customDataSnapshot: [String: AnySendable] { customData.mapValues(AnySendable.init) }
+    func updateCustomData(_ data: [String: Any]) { customData.merge(data) { _, new in new } }
+    func clearCustomData() { customData.removeAll() }
+    func getMessages() -> [Message] { messages }
+    func clearPending() {}  // Never replay a potentially accepted turn after reconnect.
+    func resendPending() {}
 
-    var customDataSnapshot: [String: AnySendable] {
-        customData.mapValues { AnySendable($0) }
-    }
-
-    func updateCustomData(_ data: [String: Any]) {
-        for (key, value) in data {
-            customData[key] = value
+    func send(text: String, metadata: [String: Any]? = nil, attachmentIds: [String]? = nil) async throws -> String {
+        guard sessionManager.isConnected() else { throw ChatClientError.notConnected }
+        guard (attachmentIds?.count ?? 0) <= AttachmentConfig.maxFilesPerMessage,
+            attachmentIds?.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? true
+        else { throw AttachmentError("A message can contain at most five attachments") }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentIds?.isEmpty == false else {
+            throw AttachmentError("Enter a message or attach a file")
         }
-        ArtemisLogger.debug("Custom data updated", metadata: ["keys": Array(customData.keys)])
+        guard text.count <= 10_000 else { throw AttachmentError("Messages must be 10,000 characters or fewer") }
+        let id = UUID().uuidString
+        let acceptedAt = Date()
+        try await sessionManager.sendAsync(
+            .chatMessage(
+                text: text, messageId: id, sessionId: sessionManager.getSessionId(),
+                attachmentIds: attachmentIds, metadata: metadata, customData: customData.isEmpty ? nil : customData))
+        acceptedUser(id: id, text: text, metadata: metadata, attachmentIds: attachmentIds, timestamp: acceptedAt)
+        return id
     }
 
-    func clearCustomData() {
-        customData.removeAll()
-    }
-
-    @discardableResult
-    func send(
-        text: String,
-        metadata: [String: Any]? = nil,
-        attachmentIds: [String]? = nil
-    ) async throws -> String {
-        guard sessionManager.isConnected() else {
-            throw ChatClientError.notConnected
-        }
-
-        let messageId = generateId()
-        let userMessage = Message(
-            id: messageId,
-            role: .user,
-            content: text,
-            timestamp: Date(),
-            metadata: JSONValue.anySendableDictionary(from: metadata),
-            attachmentIds: attachmentIds
-        )
-
-        let pending = PendingMessage(
-            messageId: messageId,
-            text: text,
-            attachmentIds: attachmentIds,
-            metadata: metadata,
-            customData: customData.isEmpty ? nil : customData
-        )
-        try transmit(pending)
-        inFlight.append(pending)
-        addMessage(userMessage)
-        emit(.messageReceived(userMessage))
-
-        return messageId
+    private func acceptedUser(
+        id: String, text: String, metadata: [String: Any]?, attachmentIds: [String]? = nil, timestamp: Date = Date()
+    ) {
+        var safeMetadata = redaction ? [:] : metadata ?? [:]
+        if redaction { safeMetadata.removeValue(forKey: "display_label") }
+        let message = Message(
+            id: id, role: .user, content: redaction ? "••••" : text, timestamp: timestamp,
+            metadata: safeMetadata.mapValues(AnySendable.init), attachmentIds: attachmentIds, pendingRender: redaction,
+            status: .accepted)
+        upsert(message)
+        emit(.messageReceived(message))
+        let completedEarly = lastTerminalActivity >= timestamp
+        activeRequest = completedEarly ? nil : id
+        if let early = parkedRenders.removeValue(forKey: id) { applyRender(id: id, text: early.0, withheld: early.1) }
+        setTyping(!completedEarly && transferStatus != .queued && transferStatus != .connected)
     }
 
     func submitAction(
-        actionId: String,
-        value: String? = nil,
-        formData: [String: String]? = nil,
-        renderId: String? = nil
+        actionId: String, value: String? = nil, formData: [String: String]? = nil, renderId: String? = nil
     ) throws {
-        guard sessionManager.isConnected() else {
-            throw ChatClientError.notConnected
-        }
-
-        let trimmedId = actionId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedId.isEmpty else {
+        guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatClientError.emptyActionId
         }
-
-        try sessionManager.send(.actionSubmit(
-            actionId: trimmedId,
-            value: value,
-            formData: formData,
-            renderId: renderId
-        ))
-
-        ArtemisLogger.debug("Submitted action", metadata: [
-            "actionId": trimmedId,
-            "has_form_data": formData != nil,
-            "has_render_id": renderId != nil,
-        ])
+        if alreadySubmitted(renderId) { return }
+        try sessionManager.send(.actionSubmit(actionId: actionId, value: value, formData: formData, renderId: renderId))
+        recordAction(actionId, value: value, renderId: renderId)
+    }
+    func performAction(
+        actionId: String, value: String?, formData: [String: String]?, renderId: String?, displayText: String?
+    ) async throws {
+        guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ChatClientError.emptyActionId
+        }
+        if alreadySubmitted(renderId) { return }
+        if let renderId {
+            guard pendingActionRenders.insert(renderId).inserted else {
+                throw AttachmentError("This action is already pending")
+            }
+        }
+        defer { if let renderId { pendingActionRenders.remove(renderId) } }
+        var payload: [String: Any] = ["type": "action_submit", "actionId": actionId]
+        payload["value"] = value
+        payload["formData"] = formData
+        payload["renderId"] = renderId
+        let id = UUID().uuidString
+        let acceptedAt = Date()
+        if let displayText, !displayText.isEmpty {
+            payload["messageId"] = id
+            payload["displayText"] = String(displayText.prefix(500))
+        }
+        try await sessionManager.sendAsync(.raw(payload))
+        recordAction(actionId, value: value, renderId: renderId)
+        if let displayText, !displayText.isEmpty {
+            acceptedUser(id: id, text: displayText, metadata: nil, timestamp: acceptedAt)
+        }
+    }
+    private func alreadySubmitted(_ renderId: String?) -> Bool {
+        guard let renderId else { return false }
+        return messages.contains { message in
+            let actions = message.metadata?["actions"]?.value as? [String: Any] ?? [:]
+            return (actions["renderId"] as? String ?? message.id) == renderId && actions["submitted"] != nil
+        }
+    }
+    private func recordAction(_ action: String, value: String?, renderId: String?) {
+        guard let renderId else { return }
+        let selection: [String: Any] = ["actionId": action, "value": value ?? "", "status": "submitted"]
+        messages = messages.map { message in
+            var metadata = message.metadata?.mapValues(\.value) ?? [:]
+            var actions = metadata["actions"] as? [String: Any] ?? [:]
+            guard (actions["renderId"] as? String ?? message.id) == renderId else { return message }
+            actions["submitted"] = selection
+            metadata["actions"] = actions
+            return message.replacing(metadata: metadata.mapValues(AnySendable.init))
+        }
+        emit(.historyLoaded(messages: messages))
     }
 
     func submitFeedback(
-        messageId: String,
-        ratingType: String,
-        ratingValue: Int,
-        feedbackText: String? = nil,
-        actionRenderId: String? = nil,
-        timeout: TimeInterval = 10
+        messageId: String, ratingType: String, ratingValue: Int, feedbackText: String? = nil,
+        actionRenderId: String? = nil, timeout: TimeInterval = 10
     ) async throws -> String {
-        guard sessionManager.isConnected() else {
+        guard sessionManager.isConnected() else { throw ChatClientError.notConnected }
+        guard !messageId.isEmpty else { throw ChatClientError.emptyMessageId }
+        let key = messageId + "|" + (actionRenderId ?? "")
+        guard pendingFeedback[key] == nil else { throw ChatClientError.feedbackAlreadyPending }
+        return try await waitForAck(
+            key: key, survey: false, timeout: timeout,
+            frame: .feedbackSubmit(
+                messageId: messageId, ratingType: ratingType, ratingValue: ratingValue, feedbackText: feedbackText,
+                actionRenderId: actionRenderId))
+    }
+    func submitAgentTransferSurvey(_ survey: AgentTransferSurvey, score: Int, comments: String?) async throws -> String
+    {
+        guard config.features.enableContactCenter, sessionManager.isConnected() else {
             throw ChatClientError.notConnected
         }
-
-        let trimmedMessageId = messageId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedMessageId.isEmpty else {
-            throw ChatClientError.emptyMessageId
-        }
-
-        let key = feedbackKey(messageId: trimmedMessageId, actionRenderId: actionRenderId)
-        guard pendingFeedback[key] == nil else {
-            throw ChatClientError.feedbackAlreadyPending
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            let timer = DispatchSource.makeTimerSource(queue: .global())
-            timer.schedule(deadline: .now() + timeout)
-            timer.setEventHandler { [weak self] in
-                guard let self else { return }
-                if let pending = self.pendingFeedback.removeValue(forKey: key) {
-                    pending.timer.cancel()
-                    continuation.resume(throwing: ChatClientError.feedbackTimeout(timeout))
+        guard survey.validScore(score) else { throw AttachmentError("Invalid survey score") }
+        guard pendingSurveys[survey.artemisSessionId] == nil else { throw ChatClientError.feedbackAlreadyPending }
+        var payload: [String: Any] = [
+            "type": "agent_transfer_survey.submit", "artemisSessionId": survey.artemisSessionId,
+            "surveyType": survey.surveyType, "score": score,
+        ]
+        payload["smartAssistSessionId"] = survey.smartAssistSessionId
+        if survey.showComment(for: score), let comments { payload["comments"] = String(comments.prefix(4000)) }
+        return try await waitForAck(key: survey.artemisSessionId, survey: true, timeout: 10, frame: .raw(payload))
+    }
+    private func waitForAck(key: String, survey: Bool, timeout: TimeInterval, frame: TransportClientMessage)
+        async throws -> String
+    {
+        try await withCheckedThrowingContinuation { continuation in
+            let timer = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(max(0.01, timeout) * 1_000_000_000)) } catch { return }
+                self?.finishAck(key: key, survey: survey, result: .failure(ChatClientError.feedbackTimeout(timeout)))
+            }
+            let pending = PendingFeedback(continuation: continuation, timer: timer)
+            if survey { pendingSurveys[key] = pending } else { pendingFeedback[key] = pending }
+            Task { [weak self] in
+                do { try await self?.sessionManager.sendAsync(frame) } catch {
+                    self?.finishAck(key: key, survey: survey, result: .failure(error))
                 }
             }
-            timer.resume()
-
-            pendingFeedback[key] = PendingFeedback(continuation: continuation, timer: timer)
-
-            do {
-                try sessionManager.send(.feedbackSubmit(
-                    messageId: trimmedMessageId,
-                    ratingType: ratingType,
-                    ratingValue: ratingValue,
-                    feedbackText: feedbackText,
-                    actionRenderId: actionRenderId
-                ))
-            } catch {
-                timer.cancel()
-                pendingFeedback.removeValue(forKey: key)
-                continuation.resume(throwing: error)
-            }
-
-            ArtemisLogger.debug("Submitted feedback", metadata: [
-                "messageId": trimmedMessageId,
-                "ratingType": ratingType,
-                "ratingValue": ratingValue,
-            ])
         }
     }
-
-    func resendPending() {
-        guard !inFlight.isEmpty, sessionManager.isConnected() else { return }
-
-        ArtemisLogger.info("Resending unanswered messages after reconnect", metadata: [
-            "count": inFlight.count,
-        ])
-
-        for pending in inFlight {
-            try? transmit(pending, isResend: true)
-        }
+    private func finishAck(key: String, survey: Bool, result: Result<String, Error>) {
+        let pending = survey ? pendingSurveys.removeValue(forKey: key) : pendingFeedback.removeValue(forKey: key)
+        pending?.timer.cancel()
+        pending?.continuation.resume(with: result)
     }
-
-    func clearPending() {
-        inFlight.removeAll()
-    }
-
-    func getMessages() -> [Message] {
-        messages
-    }
-
-    func hydratePersistedHistory() {
-        guard let sessionId = sessionManager.getSessionId(), !sessionId.isEmpty else {
-            ArtemisLogger.debug("Persisted history hydration skipped: no active session")
-            return
+    func connectionLost() {
+        historyGeneration += 1
+        historyTask?.cancel()
+        historyTask = nil
+        for key in Array(pendingFeedback.keys) {
+            finishAck(key: key, survey: false, result: .failure(ChatClientError.notConnected))
         }
-
-        if historyHydrationTask != nil, historyHydrationSessionId == sessionId {
-            ArtemisLogger.debug("Persisted history hydration already in progress", metadata: [
-                "session_id": sessionId,
-            ])
-            return
+        for key in Array(pendingSurveys.keys) {
+            finishAck(key: key, survey: true, result: .failure(ChatClientError.notConnected))
         }
-
-        ArtemisLogger.info("Hydrating persisted history", metadata: ["session_id": sessionId])
-
-        let generation = historyHydrationGeneration
-        historyHydrationSessionId = sessionId
-
-        historyHydrationTask = Task { [weak self] in
-            guard let self else { return }
-
-            do {
-                let fetched = try await self.fetchPersistedHistory(sessionId: sessionId)
-                guard !Task.isCancelled,
-                      generation == self.historyHydrationGeneration,
-                      sessionId == self.sessionManager.getSessionId() else {
-                    ArtemisLogger.debug("Persisted history hydration result discarded", metadata: [
-                        "session_id": sessionId,
-                    ])
-                    return
-                }
-
-                ArtemisLogger.info("Persisted history fetched", metadata: [
-                    "session_id": sessionId,
-                    "fetched": fetched.count,
-                ])
-                self.mergeHydratedMessages(fetched)
-            } catch {
-                ArtemisLogger.warning("Persisted history hydration skipped", metadata: [
-                    "session_id": sessionId,
-                    "error": error.localizedDescription,
-                ])
-                self.delegate?.chatClient(self, didFailHistoryHydration: error)
-            }
-
-            if generation == self.historyHydrationGeneration {
-                self.historyHydrationTask = nil
-                self.historyHydrationSessionId = nil
-            }
-        }
+        setTyping(false)
+        activityText = nil
+        emit(.activity(text: nil))
     }
-
     func clearMessages() {
-        historyHydrationGeneration += 1
-        historyHydrationTask?.cancel()
-        historyHydrationTask = nil
-        historyHydrationSessionId = nil
+        connectionLost()
         messages.removeAll()
-        messageIds.removeAll()
-        streamingBuffers.removeAll()
-        inFlight.removeAll()
+        parkedRenders.removeAll()
+        cancelled.removeAll()
+        activeRequest = nil
+        activeResponse = nil
+        emit(.historyLoaded(messages: []))
     }
 
     func handleServerMessage(_ message: TransportServerMessage) {
+        let raw = message.raw
+        let id = raw["messageId"] as? String
         switch message.type {
+        case "session_start":
+            guard let session = raw["sessionId"] as? String, !session.isEmpty else { return }
+            if let previous = currentSessionId, previous != session {
+                clearMessages()
+                transferStatus = .none
+                transferSessionId = nil
+                lastTransferTransition = .distantPast
+                transferRevision = 0
+                emit(.agentTransferChanged(.none))
+            }
+            currentSessionId = session
+            redaction = (raw["capabilities"] as? [String: Any])?["liveUserInputRedaction"] as? Bool == true
+            activeResponse = nil
+            activeRequest = nil
+            if (raw["initialAssistantMessage"] as? [String: Any])?["expected"] as? Bool == true { setTyping(true) }
         case "response_start":
-            isTyping = true
-            if config.chat.enableTypingIndicator {
-                emit(.typingIndicator(isTyping: true))
+            guard let id, !cancelled.contains(id) else { return }
+            activeResponse = id
+            if !messages.contains(where: { $0.id == id }) {
+                let item = Message(id: id, role: .assistant, content: "", status: .streaming)
+                upsert(item)
+                emit(.messageReceived(item))
             }
-            let startMessageId = message.raw["messageId"] as? String ?? ""
-            if !startMessageId.isEmpty {
-                streamingBuffers[startMessageId] = ""
-                let streamingMessage = Message(
-                    id: startMessageId,
-                    role: .assistant,
-                    content: "",
-                    timestamp: Date()
-                )
-                upsertStreamingMessage(streamingMessage)
-                emit(.messageStart(messageId: startMessageId))
-            }
-
+            emit(.messageStart(messageId: id))
+            setTyping(true)
         case "response_chunk":
-            let chunkMessageId = message.raw["messageId"] as? String ?? ""
-            let chunk = readStreamChunk(message)
-            guard !chunkMessageId.isEmpty, !chunk.isEmpty else { break }
-
-            let buffer = (streamingBuffers[chunkMessageId] ?? "") + chunk
-            streamingBuffers[chunkMessageId] = buffer
-            let streamingMessage = Message(
-                id: chunkMessageId,
-                role: .assistant,
-                content: buffer,
-                timestamp: Date()
-            )
-            upsertStreamingMessage(streamingMessage)
-            emit(.messageChunk(messageId: chunkMessageId, chunk: chunk))
-
+            guard let id, !cancelled.contains(id),
+                let chunk = MessageNormalizer.string(raw, ["chunk", "content", "text"])
+            else { return }
+            activeResponse = id
+            let old = messages.first { $0.id == id } ?? Message(id: id, role: .assistant, content: "")
+            let item = old.replacing(content: old.content + chunk, status: .streaming)
+            upsert(item)
+            emit(.messageReceived(item))
+            emit(.messageChunk(messageId: id, chunk: chunk))
         case "response_end":
-            isTyping = false
-            if config.chat.enableTypingIndicator {
-                emit(.typingIndicator(isTyping: false))
+            let responseID = id ?? UUID().uuidString
+            guard !cancelled.contains(responseID) else { return }
+            lastTerminalActivity = Date()
+            var normalizedRaw = raw
+            let old = messages.first { $0.id == responseID }
+            if raw["timestamp"] == nil, let old {
+                normalizedRaw["timestamp"] = old.timestamp.timeIntervalSince1970 * 1000
             }
-
-            let endMessageId = message.raw["messageId"] as? String ?? generateId()
-            let envelope = message.raw["contentEnvelope"] as? [String: Any]
-            let envelopeText = envelope?["text"] as? String
-            let rawRichContent = extractRawRichContent(message.raw)
-            let rawActions = extractRawActions(message.raw)
-
-            let content = (message.raw["fullText"] as? String)
-                ?? (message.raw["text"] as? String)
-                ?? (message.raw["content"] as? String)
-                ?? envelopeText
-                ?? streamingBuffers.removeValue(forKey: endMessageId)
-                ?? ""
-
-            resolveOldestInFlight()
-
-            let hasTextContent = !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let hasRenderablePayload = hasTextContent || hasRawRichContent(rawRichContent) || hasRawActions(rawActions)
-
-            if !hasRenderablePayload {
-                emit(.error(error: ChatClientError.emptyAssistantResponse))
-                break
+            var item = MessageNormalizer.parse(normalizedRaw, id: responseID)
+            if item.content.isEmpty, let old { item = item.replacing(content: old.content) }
+            let hasPayload =
+                !item.content.isEmpty || item.metadata?["richContent"] != nil || item.metadata?["actions"] != nil
+                || !item.renderables.isEmpty || item.agentLink != nil || item.agentTransferSurvey != nil
+                || item.metadata?["attachments"] != nil
+            if hasPayload {
+                upsert(item)
+                emit(.messageEnd(messageId: responseID, message: item))
+                emit(.messageReceived(item))
+            } else {
+                messages.removeAll { $0.id == responseID }
+                emit(.historyLoaded(messages: messages))
             }
-
-            let metadata = mergeResponseMetadata(
-                metadata: message.raw["metadata"] as? [String: Any],
-                rawRichContent: rawRichContent,
-                rawActions: rawActions
-            )
-
-            let assistantMessage = Message(
-                id: endMessageId,
-                role: .assistant,
-                content: content,
-                timestamp: Date(),
-                metadata: JSONValue.anySendableDictionary(from: metadata)
-            )
-
-            streamingBuffers.removeValue(forKey: endMessageId)
-            addMessage(assistantMessage)
-            emit(.messageEnd(messageId: endMessageId, message: assistantMessage))
-            emit(.messageReceived(assistantMessage))
-
-        case "thought":
-            guard config.chat.enableThoughts else { break }
-            let thoughtContent = (message.raw["thought"] as? String)
-                ?? (message.raw["content"] as? String)
-                ?? ""
-            if !thoughtContent.isEmpty {
-                emit(.thought(content: thoughtContent))
+            if config.features.enableContactCenter, AgentTransfer.status(item) == .queued, transferStatus != .connected
+            {
+                setTransfer(.queued)
             }
-
+            if activeResponse == nil || activeResponse == responseID {
+                activeResponse = nil
+                activeRequest = nil
+                setTyping(false)
+                emit(.activity(text: nil))
+            }
+        case "user_message_rendered":
+            guard let id else { return }
+            applyRender(
+                id: id, text: MessageNormalizer.string(raw, ["content", "text"]) ?? "",
+                withheld: raw["status"] as? String == "withheld")
+        case "typing_update": setTyping(raw["isTyping"] as? Bool == true)
+        case "execution_cancelled":
+            let request = raw["requestMessageId"] as? String
+            let reason = raw["reason"] as? String ?? "client_cancel"
+            let owns =
+                request != nil
+                ? request == activeRequest || (activeRequest == nil && id == activeResponse)
+                : id != nil ? id == activeResponse : reason != "preempted"
+            if let id { cancelResponse(id) }
+            if owns {
+                lastTerminalActivity = Date()
+                activeRequest = nil
+                activeResponse = nil
+                setTyping(false)
+                emit(.activity(text: nil))
+            }
+            emit(.responseCancelled(messageId: id, reason: reason))
+        case "agent_transfer_event": handleTransfer(raw)
+        case "feedback.ack", "agent_transfer_survey.ack":
+            let survey = message.type == "agent_transfer_survey.ack"
+            let key =
+                survey
+                ? raw["artemisSessionId"] as? String ?? ""
+                : (raw["messageId"] as? String ?? "") + "|" + (raw["actionRenderId"] as? String ?? "")
+            if raw["success"] as? Bool == true {
+                finishAck(key: key, survey: survey, result: .success(raw["feedbackId"] as? String ?? key))
+            } else {
+                let error = raw["error"] as? [String: Any] ?? [:]
+                finishAck(
+                    key: key, survey: survey,
+                    result: .failure(
+                        FeedbackSubmitError(
+                            code: error["code"] as? String ?? "REJECTED",
+                            message: "Feedback could not be submitted. Please retry.")))
+            }
+        case "trace_event":
+            let event = raw["event"] as? [String: Any] ?? raw
+            let type = MessageNormalizer.string(event, ["type", "eventType"]) ?? ""
+            activity(
+                type == "tool_thought" ? "thought" : type,
+                raw: event["data"] as? [String: Any] ?? event["payload"] as? [String: Any] ?? event)
+        case "status_update", "status_clear", "thought", "handoff", "tool_warnings", "session_health":
+            activity(message.type, raw: raw)
         case "error":
-            resolveOldestInFlight()
-            let errorContent = (message.raw["content"] as? String) ?? "Unknown error"
-            emit(.error(error: ChatClientError.serverError(errorContent)))
-
-        case "status_update":
-            if config.chat.enableTypingIndicator {
-                emit(.typingIndicator(isTyping: true))
-            }
-
-        case "status_clear":
-            if config.chat.enableTypingIndicator {
-                emit(.typingIndicator(isTyping: false))
-            }
-
-        case "feedback.ack":
-            handleFeedbackAck(message.raw)
-
-        default:
-            break
+            lastTerminalActivity = Date()
+            setTyping(false)
+            emit(.activity(text: nil))
+            emit(
+                .error(
+                    error: ChatClientError.serverError(
+                        MessageNormalizer.string(raw, ["message", "content"])
+                            ?? "The assistant could not complete the response")))
+        default: break
         }
     }
 
-    // MARK: - Private
+    private func applyRender(id: String, text: String, withheld: Bool) {
+        guard let index = messages.firstIndex(where: { $0.id == id && $0.role == .user }) else {
+            parkedRenders[id] = (text, withheld)
+            if parkedRenders.count > 100, let first = parkedRenders.keys.first {
+                parkedRenders.removeValue(forKey: first)
+            }
+            return
+        }
+        guard messages[index].pendingRender else { return }
+        let item = messages[index].replacing(
+            content: withheld ? "••••" : MessageNormalizer.displayText(text), pendingRender: false)
+        messages[index] = item
+        emit(.messageReceived(item))
+    }
+    private func cancelResponse(_ id: String) {
+        if !cancelled.contains(id) {
+            cancelled.append(id)
+            cancelled = Array(cancelled.suffix(100))
+        }
+        messages = messages.compactMap { message in
+            guard message.id == id, message.status == .streaming else { return message }
+            return message.content.isEmpty ? nil : message.replacing(status: .cancelled)
+        }
+        emit(.historyLoaded(messages: messages))
+    }
+    private func handleTransfer(_ raw: [String: Any]) {
+        guard config.features.enableContactCenter, currentSessionId != nil, let event = AgentTransfer.parse(raw) else {
+            return
+        }
+        let transitions = ["agent:queued", "agent:waiting_message", "agent:connected", "agent:disconnected"]
+        guard !transitions.contains(event.type) || event.timestamp >= lastTransferTransition else { return }
+        for item in event.messages {
+            guard
+                !item.content.isEmpty || item.agentLink != nil || item.agentTransferSurvey != nil
+                    || item.metadata?["attachments"] != nil
+            else { continue }
+            if let identity = AgentTransfer.identity(item),
+                let old = messages.first(where: { AgentTransfer.identity($0) == identity })
+            {
+                upsert(old.replacing(content: item.content, metadata: item.metadata))
+            } else {
+                upsert(item)
+            }
+        }
+        var next: AgentTransferStatus?
+        switch event.type {
+        case "agent:queued": next = .queued
+        case "agent:waiting_message":
+            if transferStatus != .connected || transferSessionId != event.sessionId { next = .queued }
+        case "agent:connected": next = .connected
+        case "agent:message", "agent:form", "agent.attachment": if transferStatus != .disconnected { next = .connected }
+        case "agent:disconnected": next = .disconnected
+        default: break
+        }
+        if let next, event.timestamp >= lastTransferTransition {
+            lastTransferTransition = event.timestamp
+            transferRevision += 1
+            transferSessionId = event.sessionId
+            if let activeResponse { cancelResponse(activeResponse) }
+            activeResponse = nil
+            activeRequest = nil
+            setTransfer(next)
+            setTyping(false)
+            emit(.activity(text: nil))
+        }
+        if ["agent:typing", "agent:typing_stop", "agent:message"].contains(event.type),
+            transferSessionId == nil || transferSessionId == event.sessionId, transferStatus != .disconnected
+        {
+            setTyping(event.type == "agent:typing")
+        }
+        emit(.historyLoaded(messages: messages))
+    }
+    private func setTransfer(_ value: AgentTransferStatus) {
+        transferStatus = value
+        emit(.agentTransferChanged(value))
+    }
+    private func activity(_ type: String, raw: [String: Any]) {
+        if type == "status_clear" {
+            activityText = nil
+            emit(.activity(text: nil))
+            setTyping(false)
+            return
+        }
+        guard config.features.enableActivityUpdates, let scope = sessionManager.getScope(), scope.showActivityUpdates
+        else { return }
+        let policy = scope.activityVisibilityPolicy.mapValues(\.value)
+        guard policy["enabled"] as? Bool != false else { return }
+        let category = type == "thought" ? "thoughtSummaries" : type == "status_update" ? "fillers" : "systemNotices"
+        guard policy[category] as? Bool ?? (category != "thoughtSummaries") else { return }
+        if type == "thought", !config.chat.enableThoughts { return }
+        let value: String?
+        switch type {
+        case "thought": value = MessageNormalizer.string(raw, ["thought", "content", "reasoning"])
+        case "status_update": value = MessageNormalizer.string(raw, ["text", "content"])
+        case "handoff":
+            value =
+                policy["exposeAgentNames"] as? Bool == true
+                ? "Transferring to \(MessageNormalizer.string(raw, ["toAgent", "to"]) ?? "another assistant")"
+                : "Transferring to another assistant"
+        case "tool_warnings": value = "Some tools could not complete their work"
+        case "session_health": value = "The conversation needs attention"
+        default: return
+        }
+        guard let value, !value.isEmpty else { return }
+        let text = String(value.prefix(min(2000, max(1, policy["maxTextChars"] as? Int ?? 240))))
+        if type == "status_update" {
+            activityText = text
+            emit(.activity(text: text))
+            setTyping(true)
+        } else {
+            let message = Message(
+                id: raw["messageId"] as? String ?? UUID().uuidString, role: type == "thought" ? .thought : .system,
+                content: text)
+            upsert(message)
+            emit(.messageReceived(message))
+        }
+    }
+    private func setTyping(_ value: Bool) {
+        if config.chat.enableTypingIndicator { emit(.typingIndicator(isTyping: value)) }
+    }
+    private func upsert(_ item: Message) {
+        if let i = messages.firstIndex(where: { $0.id == item.id }) {
+            messages[i] = item
+        } else if item.role == .user, let index = messages.firstIndex(where: { $0.timestamp > item.timestamp }) {
+            messages.insert(item, at: index)
+        } else {
+            messages.append(item)
+        }
+        messages = Array(messages.suffix(max(1, config.chat.maxMessagesLocal)))
+    }
+    private func emit(_ event: ChatEvent) { delegate?.chatClient(self, didReceive: event) }
 
-    private func transmit(_ pending: PendingMessage, isResend: Bool = false) throws {
-        try sessionManager.send(.chatMessage(
-            text: pending.text,
-            messageId: pending.messageId,
-            sessionId: sessionManager.getSessionId(),
-            attachmentIds: pending.attachmentIds,
-            metadata: pending.metadata,
-            customData: pending.customData
-        ))
-
-        ArtemisLogger.debug(isResend ? "Resent chat message" : "Sent chat message", metadata: [
-            "id": pending.messageId,
-            "has_custom_data": pending.customData != nil,
+    func hydratePersistedHistory() {
+        guard config.features.enableHistory, let id = sessionManager.getSessionId(), historyTask == nil else { return }
+        let epoch = historyGeneration
+        let transferAtRequest = transferRevision
+        historyTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if epoch == self.historyGeneration { self.historyTask = nil } }
+            do {
+                let fetched = try await self.fetchHistory(sessionId: id)
+                guard !Task.isCancelled, epoch == self.historyGeneration, id == self.sessionManager.getSessionId()
+                else { return }
+                self.mergeHistory(fetched, transferAtRequest: transferAtRequest)
+            } catch {
+                if !Task.isCancelled { self.delegate?.chatClient(self, didFailHistoryHydration: error) }
+            }
+        }
+    }
+    private func fetchHistory(sessionId: String) async throws -> [Message] {
+        let token = try await sessionManager.getAuthToken()
+        var result: [Message] = []
+        var cursor: String?
+        for _ in 0..<max(1, config.chat.maxHistoryPages) {
+            var url = URLComponents(string: sessionManager.getEndpoint())!
+            url.path += "/api/projects/\(sessionManager.getProjectId())/sessions/\(sessionId)/messages"
+            url.queryItems = [
+                URLQueryItem(name: "direction", value: "asc"),
+                URLQueryItem(name: "limit", value: String(max(1, config.chat.historyPageSize))),
+            ]
+            if let cursor { url.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
+            var request = URLRequest(url: url.url!)
+            request.timeoutInterval = 20
+            request.setValue(token, forHTTPHeaderField: "X-SDK-Token")
+            let (data, response) = try await httpSession.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw ChatClientError.historyRequestFailed(status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+            }
+            let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            let records = body["messages"] as? [[String: Any]] ?? []
+            result += records.compactMap { raw in
+                guard let id = raw["id"] as? String, let roleString = raw["role"] as? String,
+                    let role = MessageRole(rawValue: roleString)
+                else { return nil }
+                return MessageNormalizer.parse(raw, role: role, id: id)
+            }
+            guard body["hasMore"] as? Bool == true, let next = body["nextCursor"] as? String, !next.isEmpty,
+                next != cursor
+            else { break }
+            cursor = next
+        }
+        return result
+    }
+    func mergeHistory(_ incoming: [Message], transferAtRequest: Int? = nil) {
+        var unique = Set<String>()
+        let expanded = incoming.flatMap { message -> [Message] in
+            guard config.features.enableContactCenter,
+                let raw = message.metadata?["restoredAgentTransferSurvey"]?.value as? [String: Any],
+                let survey = AgentTransferSurvey.parse(raw, wire: true)
+            else { return [message] }
+            return [
+                message,
+                Message(
+                    id: "agent-transfer-survey-\(survey.artemisSessionId)", role: .assistant,
+                    content: survey.prompt, timestamp: message.timestamp,
+                    metadata: ["agentTransferSurvey": AnySendable(raw)]),
+            ]
+        }
+        let history = expanded.filter { unique.insert($0.id).inserted }
+        let ids = Set(history.map(\.id))
+        let identities = Set(history.compactMap(AgentTransfer.identity))
+        let localIDs = Set(messages.map(\.id))
+        var pool: [String: Int] = [:]
+        for item in history where !localIDs.contains(item.id) { pool[fingerprint(item), default: 0] += 1 }
+        let locals = messages.filter { item in
+            if ids.contains(item.id) || AgentTransfer.identity(item).map({ identities.contains($0) }) == true {
+                return false
+            }
+            if item.status == .streaming || item.pendingRender { return true }
+            let key = fingerprint(item)
+            let count = pool[key] ?? 0
+            if count > 0 {
+                pool[key] = count - 1
+                return false
+            }
+            return true
+        }
+        if !history.isEmpty && history.allSatisfy({ $0.sequence != nil }) {
+            messages = history.sorted { $0.sequence! < $1.sequence! } + locals.sorted { $0.timestamp < $1.timestamp }
+        } else {
+            messages = (history + locals).sorted { $0.timestamp < $1.timestamp }
+        }
+        let selections = messages.compactMap {
+            ($0.metadata?["custom"]?.value as? [String: Any])?["actionSubmit"] as? [String: Any]
+        }
+        for selection in selections {
+            if let render = selection["renderId"] as? String, let action = selection["actionId"] as? String {
+                recordAction(action, value: selection["value"] as? String, renderId: render)
+            }
+        }
+        messages = Array(messages.suffix(max(1, config.chat.maxMessagesLocal)))
+        if config.features.enableContactCenter, transferAtRequest == nil || transferAtRequest == transferRevision,
+            let latest = messages.last(where: { AgentTransfer.status($0) != nil }),
+            latest.timestamp >= lastTransferTransition
+        {
+            lastTransferTransition = latest.timestamp
+            transferSessionId = latest.metadata?["agentTransferSessionId"]?.value as? String
+            setTransfer(AgentTransfer.status(latest)!)
+        }
+        emit(.historyLoaded(messages: messages))
+    }
+    private func fingerprint(_ message: Message) -> String {
+        let raw = message.metadata?.mapValues(\.value) ?? [:]
+        return MessageNormalizer.jsonString([
+            "role": message.role.rawValue, "text": message.content, "richContent": raw["richContent"] ?? NSNull(),
+            "actions": raw["actions"] ?? NSNull(), "attachments": raw["attachments"] ?? NSNull(),
         ])
     }
-
-    private func handleFeedbackAck(_ raw: [String: Any]) {
-        let messageId = raw["messageId"] as? String ?? ""
-        guard !messageId.isEmpty else { return }
-
-        let actionRenderId = raw["actionRenderId"] as? String
-        let key = feedbackKey(messageId: messageId, actionRenderId: actionRenderId)
-        guard let pending = pendingFeedback.removeValue(forKey: key) else { return }
-
-        pending.timer.cancel()
-
-        let success = raw["success"] as? Bool == true
-        let feedbackId = raw["feedbackId"] as? String
-
-        if success, let feedbackId, !feedbackId.isEmpty {
-            pending.continuation.resume(returning: feedbackId)
-        } else {
-            let errorRaw = raw["error"] as? [String: Any]
-            let code = errorRaw?["code"] as? String ?? "FEEDBACK_REJECTED"
-            let message = errorRaw?["message"] as? String ?? "Feedback rejected"
-            pending.continuation.resume(throwing: FeedbackSubmitError(code: code, message: message))
-        }
-    }
-
-    private func feedbackKey(messageId: String, actionRenderId: String?) -> String {
-        "\(messageId)|\(actionRenderId ?? "")"
-    }
-
-    private func resolveOldestInFlight() {
-        if !inFlight.isEmpty {
-            inFlight.removeFirst()
-        }
-    }
-
-    private func addMessage(_ message: Message) {
-        if messageIds.contains(message.id) {
-            if let index = messages.firstIndex(where: { $0.id == message.id }) {
-                messages[index] = message
-            }
-            return
-        }
-
-        messageIds.insert(message.id)
-        messages.append(message)
-
-        let maxMessages = config.chat.maxMessagesLocal
-        if messages.count > maxMessages {
-            let overflow = messages.count - maxMessages
-            for i in 0 ..< overflow {
-                messageIds.remove(messages[i].id)
-            }
-            messages.removeFirst(overflow)
-        }
-    }
-
-    private func upsertStreamingMessage(_ message: Message) {
-        addMessage(message)
-        emit(.messageReceived(message))
-    }
-
-    private func emit(_ event: ChatEvent) {
-        delegate?.chatClient(self, didReceive: event)
-    }
-
-    private func fetchPersistedHistory(sessionId: String) async throws -> [Message] {
-        let authToken = try await sessionManager.getAuthToken()
-        let perPage = config.chat.historyPageSize
-        let maxPages = config.chat.maxHistoryPages
-        var hydrated: [Message] = []
-        var cursor: String?
-
-        for page in 0 ..< maxPages {
-            let uri = buildHistoryURI(sessionId: sessionId, cursor: cursor, limit: perPage)
-            var request = URLRequest(url: uri)
-            request.setValue(authToken, forHTTPHeaderField: "X-SDK-Token")
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw ChatClientError.historyRequestFailed(status: 0)
-            }
-            if !(200 ... 299).contains(http.statusCode) {
-                throw ChatClientError.historyRequestFailed(status: http.statusCode)
-            }
-
-            let body = try JSONSerialization.jsonObject(with: data)
-            let parsed = parsePersistedHistoryPage(body)
-            hydrated.append(contentsOf: parsed.messages)
-
-            if !parsed.hasMore || parsed.nextCursor == nil {
-                break
-            }
-            cursor = parsed.nextCursor
-            _ = page
-        }
-
-        return hydrated
-    }
-
-    private func buildHistoryURI(sessionId: String, cursor: String?, limit: Int) -> URL {
-        let projectId = sessionManager.getProjectId()
-        var components = URLComponents(string: sessionManager.getEndpoint())!
-        components.path = "/api/projects/\(projectId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? projectId)/sessions/\(sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId)/messages"
-        var queryItems = [
-            URLQueryItem(name: "direction", value: "asc"),
-            URLQueryItem(name: "limit", value: String(limit)),
-        ]
-        if let cursor, !cursor.isEmpty {
-            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
-        }
-        components.queryItems = queryItems
-        return components.url!
-    }
-
-    private struct PersistedHistoryPage {
-        let messages: [Message]
-        let nextCursor: String?
-        let hasMore: Bool
-    }
-
-    private func parsePersistedHistoryPage(_ body: Any) -> PersistedHistoryPage {
-        guard let map = body as? [String: Any], let rawMessages = map["messages"] as? [Any] else {
-            return PersistedHistoryPage(messages: [], nextCursor: nil, hasMore: false)
-        }
-
-        let messages = rawMessages.compactMap { parsePersistedHistoryMessage($0) }
-        return PersistedHistoryPage(
-            messages: messages,
-            nextCursor: map["nextCursor"] as? String,
-            hasMore: map["hasMore"] as? Bool == true
-        )
-    }
-
-    private func parsePersistedHistoryMessage(_ raw: Any) -> Message? {
-        guard let map = raw as? [String: Any],
-              let id = map["id"] as? String,
-              let role = map["role"] as? String else {
-            return nil
-        }
-
-        let envelope = map["contentEnvelope"] as? [String: Any]
-        let envelopeText = envelope?["text"] as? String
-        let rawContent = map["content"] as? String
-        let content: String
-        if let rawContent, !rawContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            content = rawContent
-        } else {
-            content = envelopeText ?? ""
-        }
-
-        let timestamp: Date
-        if let rawTimestamp = map["timestamp"] as? String {
-            timestamp = ISO8601DateFormatter().date(from: rawTimestamp) ?? Date()
-        } else {
-            timestamp = Date()
-        }
-
-        return Message(
-            id: id,
-            role: roleFromString(role),
-            content: content,
-            timestamp: timestamp,
-            metadata: JSONValue.anySendableDictionary(from: mergeRichContentMetadata(
-                metadata: map["metadata"] as? [String: Any],
-                rawRichContent: extractRawRichContent(map)
-            ))
-        )
-    }
-
-    private func mergeHydratedMessages(_ newMessages: [Message]) {
-        guard !newMessages.isEmpty else { return }
-
-        var existingIds = Set(messages.map(\.id))
-        var existingFingerprints = Set(messages.map(fingerprint))
-        var toAdd: [Message] = []
-
-        for message in newMessages {
-            if existingIds.contains(message.id) { continue }
-            let fp = fingerprint(message)
-            if existingFingerprints.contains(fp) { continue }
-            existingIds.insert(message.id)
-            existingFingerprints.insert(fp)
-            toAdd.append(message)
-        }
-
-        guard !toAdd.isEmpty else {
-            ArtemisLogger.debug("Persisted history merge: no new messages")
-            return
-        }
-
-        ArtemisLogger.info("Merging persisted history", metadata: ["new_messages": toAdd.count])
-        messages.append(contentsOf: toAdd)
-        messages.sort { $0.timestamp < $1.timestamp }
-
-        let maxMessages = config.chat.maxMessagesLocal
-        if messages.count > maxMessages {
-            messages.removeFirst(messages.count - maxMessages)
-        }
-
-        messageIds = Set(messages.map(\.id))
-        emit(.historyLoaded(messages: getMessages()))
-    }
-
-    private func fingerprint(_ message: Message) -> String {
-        "\(message.role)|\(message.content)|\(message.timestamp.timeIntervalSince1970)"
-    }
-
-    private func roleFromString(_ role: String) -> MessageRole {
-        switch role.lowercased() {
-        case "user": return .user
-        case "assistant": return .assistant
-        case "system": return .system
-        case "thought": return .thought
-        default: return .assistant
-        }
-    }
-
-    private func extractRawRichContent(_ raw: [String: Any]) -> [String: Any]? {
-        if let direct = raw["richContent"] as? [String: Any] ?? raw["rich_content"] as? [String: Any] {
-            return direct
-        }
-        if let envelope = raw["contentEnvelope"] as? [String: Any] {
-            return envelope["richContent"] as? [String: Any] ?? envelope["rich_content"] as? [String: Any]
-        }
-        return nil
-    }
-
-    private func hasRawRichContent(_ raw: [String: Any]?) -> Bool {
-        guard let raw else { return false }
-        return !raw.isEmpty
-    }
-
-    private func extractRawActions(_ raw: [String: Any]) -> [String: Any]? {
-        if let direct = raw["actions"] as? [String: Any] {
-            return direct
-        }
-        if let envelope = raw["contentEnvelope"] as? [String: Any] {
-            return envelope["actions"] as? [String: Any]
-        }
-        return nil
-    }
-
-    private func hasRawActions(_ raw: [String: Any]?) -> Bool {
-        guard let raw, !raw.isEmpty else { return false }
-        let elements = raw["elements"] as? [Any]
-        return elements?.isEmpty == false
-    }
-
-    private func mergeResponseMetadata(
-        metadata: [String: Any]?,
-        rawRichContent: [String: Any]?,
-        rawActions: [String: Any]?
-    ) -> [String: Any]? {
-        var merged = metadata ?? [:]
-        if let rawRichContent, !rawRichContent.isEmpty {
-            merged["richContent"] = rawRichContent
-        }
-        if hasRawActions(rawActions) {
-            merged["actions"] = rawActions as Any
-        }
-        return merged.isEmpty ? nil : merged
-    }
-
-    private func mergeRichContentMetadata(
-        metadata: [String: Any]?,
-        rawRichContent: [String: Any]?
-    ) -> [String: Any]? {
-        guard let rawRichContent, !rawRichContent.isEmpty else { return metadata }
-        var merged = metadata ?? [:]
-        merged["richContent"] = rawRichContent
-        return merged
-    }
-
-    private func readStreamChunk(_ message: TransportServerMessage) -> String {
-        if let chunk = message.raw["chunk"] as? String, !chunk.isEmpty { return chunk }
-        if let content = message.raw["content"] as? String, !content.isEmpty { return content }
-        return ""
-    }
-
-    private func generateId() -> String {
-        "msg_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
-    }
-}
-
-private struct PendingMessage {
-    let messageId: String
-    let text: String
-    let attachmentIds: [String]?
-    let metadata: [String: Any]?
-    let customData: [String: Any]?
 }
 
 private struct PendingFeedback {
     let continuation: CheckedContinuation<String, Error>
-    let timer: DispatchSourceTimer
+    let timer: Task<Void, Never>
 }
 
 enum ChatClientError: Error, LocalizedError {
-    case notConnected
-    case emptyActionId
-    case emptyMessageId
-    case feedbackAlreadyPending
+    case notConnected, emptyActionId, emptyMessageId, feedbackAlreadyPending
     case feedbackTimeout(TimeInterval)
-    case emptyAssistantResponse
     case serverError(String)
     case historyRequestFailed(status: Int)
-
     var errorDescription: String? {
         switch self {
         case .notConnected: return "Not connected to the platform"
         case .emptyActionId: return "actionId must not be empty"
         case .emptyMessageId: return "messageId must not be empty"
-        case .feedbackAlreadyPending: return "Feedback already pending for this message"
-        case .feedbackTimeout(let timeout): return "Feedback ack timed out after \(Int(timeout * 1000))ms"
-        case .emptyAssistantResponse: return "Received empty assistant response"
-        case .serverError(let message): return message
-        case .historyRequestFailed(let status): return "History request failed: \(status)"
+        case .feedbackAlreadyPending: return "Feedback is already pending"
+        case .feedbackTimeout: return "The server did not respond. Please retry."
+        case .serverError(let text): return text
+        case .historyRequestFailed(let status): return "History request failed (\(status))"
         }
     }
 }

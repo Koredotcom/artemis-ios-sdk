@@ -55,6 +55,25 @@ AgentChatUI.present(from: self, configuration: configuration, title: "Support")
 
 The SDK starts the chat connection when the screen appears and stops it when the screen closes. Use either Swift Package Manager or CocoaPods for a given app target.
 
+To support **minimize and reopen**, retain a handle in the parent app and use the
+handle overload. Minimize preserves the connection, draft text, selected files,
+form values and survey state. Close releases those resources. The existing
+configuration overloads retain their close-on-disappear behavior and show only
+Close; the retained-handle overloads also show Minimize.
+
+```swift
+private lazy var chatHandle = AgentChatUI.initialize(configuration: configuration)
+
+// Inside the host's button action:
+AgentChatUI.show(in: self, handle: chatHandle, title: "Support")
+// Modal: AgentChatUI.present(from: self, handle: chatHandle, title: "Support")
+// SwiftUI: AgentChatUI.view(handle: chatHandle, title: "Support")
+```
+
+Call `chatHandle.close()` when the host no longer needs a minimized conversation.
+`chatHandle.endSession()` explicitly ends the Runtime session. Set
+`SessionConfig(endSessionOnClose: true)` to end it whenever chat closes.
+
 For a SwiftUI host:
 
 ```swift
@@ -173,6 +192,105 @@ templates call the socket SDK's `submitAction`/`submitFeedback` paths.
 Host apps can still pass a `RichTemplateRegistry` for custom payloads. Register
 a renderer with the same type as a built-in, for example `RichTemplateTypes.kpi`,
 to suppress the default renderer and provide an app-specific one.
+
+## Android commit parity
+
+This implementation follows Android commit
+[`b63db190f4c837a5e88cc481bb7f8709ef96769f`](https://github.com/Koredotcom/artemis-android-sdk/commit/b63db190f4c837a5e88cc481bb7f8709ef96769f).
+It includes the title/status header, retained-handle minimize/reopen lifecycle,
+40-point attachment/send controls, a separate rounded multiline composer,
+five-file draft strip, file-type icons and expandable sent-file groups. Reading
+older messages pauses automatic following; sending or tapping Latest resumes it.
+
+Attachments and transferred-agent text UI are opt-in:
+
+```swift
+let configuration = SDKConfiguration(
+    environment: "dev",
+    connection: ConnectionConfig(
+        projectId: "your-project-id",
+        endpoint: "https://runtime.example.com",
+        apiKey: "pk_your_public_key"
+    ),
+    channel: ChannelConfig(channelName: "mobile"),
+    features: FeaturesConfig(enableAttachments: true, enableContactCenter: true),
+    attachments: AttachmentConfig(maxFileSizeBytes: 20 * 1024 * 1024)
+)
+```
+
+The attachment button additionally requires Runtime init/refresh branding
+`widgetConfig.theme.attachmentButtonEnabled: true` (or the string `"true"`) and
+the `attachment:write` permission. It remains hidden when either is absent.
+Permission/branding revocation cancels uploads and prevents attachment sends;
+text chat remains usable. The stock picker filters allowed MIME types. All
+staged files, including failed/cancelled files, count toward the five-file limit.
+Uploads are sequential, bounded to at most 20 MiB per nonempty file, and have
+individual progress, cancel, retry and remove controls. Failed sends retain the
+batch and text. Signed download URLs are resolved only when opening a file; a
+server-local storage URL uses the authenticated delivery-URL route instead.
+
+Transferred-agent support includes queue/connection notices, plain-text messages,
+typing, safe external forms, scoped attachments, failed-delivery indicators and
+NPS/CSAT/like-dislike surveys. Survey success requires its matching transfer-survey
+acknowledgment; ordinary feedback acknowledgments cannot complete it. Survey
+definitions absent from Runtime history still require server event replay after
+an offline close. Agent voice/video calls, screen sharing, co-browsing, AI voice,
+OAuth cards, omnichannel continuity and outbound calling are outside this commit's
+scope. Generic rich feedback supports thumbs and star ratings with retryable
+acknowledgment states; unsupported scale/text templates show an availability
+message instead of sending an incorrect rating type.
+
+These are local source changes, not a published release. This repository now
+contains the matching `ArtemisSocketSDK` source under
+`Sources/ArtemisSocketSDK`; SwiftPM builds it as a product alongside
+`ArtemisUISDK`. For local CocoaPods integration from the `Example` directory,
+the UI podspec still depends on the separately packaged socket pod, so use:
+
+```ruby
+pod 'ArtemisSocketSDK', :path => '../../artemis_ios_socket_sdk'
+pod 'ArtemisUISDK', :path => '..'
+```
+
+The socket source in this repository was synchronized from the current local
+`artemis_ios_socket_sdk` checkout, including its uncommitted implementation
+updates. Run `pod install` after changing the CocoaPods dependencies. A future
+release must publish matching UI/socket artifacts; the existing published
+version numbers have not been changed here.
+
+The socket layer now supports server-authored user display/redaction, early and
+withheld renders, owned cancellation and late-frame suppression, canonical
+envelopes/renderables/citations/provenance, occurrence-aware history merging,
+restored action locks and policy-controlled activity. Potentially accepted turns,
+uploads and surveys are never silently replayed. Hosted bootstrap can use
+an asynchronous `bootstrapTokenProvider` closure on `ConnectionConfig`; omit
+public-key channel/user selection for hosted bootstrap. Persistent opaque
+client-session identity and unlimited transient retries remain opt-in: pass
+`clientSessionIdentifier: true` to `ConnectionConfig` and
+`unlimitedTransientRetries: true` to `ReconnectionConfig`. Credentials are not cached.
+
+Equivalent YAML additions live under the existing `artemis_sdk` root:
+
+```yaml
+features:
+  enable_attachments: true
+  enable_contact_center: true
+  enable_history: true
+  enable_citations: true
+attachments:
+  max_file_size_bytes: 20971520
+  allowed_mime_types: [application/pdf, text/plain, image/jpeg, image/png]
+session:
+  idle_disconnect_timeout_ms: 600000
+  end_session_on_idle: false
+  stale_session_refresh_ms: 0
+  end_session_on_close: false
+```
+
+`connection` also accepts `client_session_identifier` and `session_metadata`;
+`websocket.reconnection` accepts `unlimited_transient_retries`. Token providers
+are programmatic only. Existing YAML keys and public initialization methods
+remain available. Live Runtime/provider acceptance is separate from the offline
+protocol and native UI tests in this repository.
 
 ### UI source organization
 

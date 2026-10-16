@@ -15,7 +15,10 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '15.0'
   s.swift_version = '5.9'
   s.module_name = 'ArtemisUISDK'
-  s.source_files = 'Sources/ArtemisUISDK/**/*.swift'
-  s.frameworks = 'Foundation', 'SwiftUI', 'Combine', 'UIKit'
-  s.dependency 'ArtemisSocketSDK', '1.0.1'
+  s.source_files = 'Sources/ArtemisUISDK/**/*.swift', 'Sources/ArtemisSocketSDK/**/*.swift'
+  s.resource_bundles = {
+    'ArtemisUISDK_Privacy' => ['Sources/ArtemisSocketSDK/PrivacyInfo.xcprivacy']
+  }
+  s.frameworks = 'Foundation', 'SwiftUI', 'Combine', 'UIKit', 'CryptoKit'
+  s.dependency 'Yams', '~> 5.0'
 end

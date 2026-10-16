@@ -19,6 +19,8 @@ public struct SDKConfiguration: Sendable {
     public let localization: LocalizationConfig
     public let security: SecurityConfig
     public let analytics: AnalyticsConfig?
+    public let session: SessionConfig
+    public let attachments: AttachmentConfig
 
     public init(
         environment: String,
@@ -36,7 +38,9 @@ public struct SDKConfiguration: Sendable {
         features: FeaturesConfig = .default,
         localization: LocalizationConfig = .default,
         security: SecurityConfig = .default,
-        analytics: AnalyticsConfig? = nil
+        analytics: AnalyticsConfig? = nil,
+        session: SessionConfig = .init(),
+        attachments: AttachmentConfig = .init()
     ) {
         self.environment = environment
         self.connection = connection
@@ -54,6 +58,8 @@ public struct SDKConfiguration: Sendable {
         self.localization = localization
         self.security = security
         self.analytics = analytics
+        self.session = session
+        self.attachments = attachments
     }
 
     func copyWithUserContext(_ context: SDKUserContext) -> SDKConfiguration {
@@ -76,7 +82,9 @@ public struct SDKConfiguration: Sendable {
             features: features,
             localization: localization,
             security: security,
-            analytics: analytics
+            analytics: analytics,
+            session: session,
+            attachments: attachments
         )
     }
 }
@@ -88,12 +96,22 @@ public struct ConnectionConfig: Sendable {
     public let endpoint: String
     public let apiKey: String?
     public let bootstrapToken: String?
+    public let bootstrapTokenProvider: (@Sendable () async throws -> String)?
+    public let clientSessionIdentifier: Bool
+    public let sessionMetadata: [String: AnySendable]?
 
-    public init(projectId: String, endpoint: String, apiKey: String? = nil, bootstrapToken: String? = nil) {
+    public init(
+        projectId: String, endpoint: String, apiKey: String? = nil, bootstrapToken: String? = nil,
+        bootstrapTokenProvider: (@Sendable () async throws -> String)? = nil,
+        clientSessionIdentifier: Bool = false, sessionMetadata: [String: AnySendable]? = nil
+    ) {
         self.projectId = projectId
         self.endpoint = endpoint
         self.apiKey = apiKey
         self.bootstrapToken = bootstrapToken
+        self.bootstrapTokenProvider = bootstrapTokenProvider
+        self.clientSessionIdentifier = clientSessionIdentifier
+        self.sessionMetadata = sessionMetadata
     }
 }
 
@@ -142,6 +160,7 @@ public struct ReconnectionConfig: Sendable {
     public let baseDelayMs: Int
     public let maxDelayMs: Int
     public let exponentialBackoff: Bool
+    public let unlimitedTransientRetries: Bool
 
     public static let `default` = ReconnectionConfig()
 
@@ -150,13 +169,15 @@ public struct ReconnectionConfig: Sendable {
         maxAttempts: Int = 5,
         baseDelayMs: Int = 1000,
         maxDelayMs: Int = 30000,
-        exponentialBackoff: Bool = true
+        exponentialBackoff: Bool = true,
+        unlimitedTransientRetries: Bool = false
     ) {
         self.enabled = enabled
         self.maxAttempts = maxAttempts
         self.baseDelayMs = baseDelayMs
         self.maxDelayMs = maxDelayMs
         self.exponentialBackoff = exponentialBackoff
+        self.unlimitedTransientRetries = unlimitedTransientRetries
     }
 }
 
@@ -369,6 +390,10 @@ public struct FeaturesConfig: Sendable {
     public let enableFileUpload: Bool
     public let enableFeedback: Bool
     public let enableActivityUpdates: Bool
+    public let enableAttachments: Bool
+    public let enableContactCenter: Bool
+    public let enableHistory: Bool
+    public let enableCitations: Bool
 
     public static let `default` = FeaturesConfig()
 
@@ -382,7 +407,11 @@ public struct FeaturesConfig: Sendable {
         enableVoice: Bool = true,
         enableFileUpload: Bool = true,
         enableFeedback: Bool = true,
-        enableActivityUpdates: Bool = false
+        enableActivityUpdates: Bool = false,
+        enableAttachments: Bool = false,
+        enableContactCenter: Bool = false,
+        enableHistory: Bool = true,
+        enableCitations: Bool = true
     ) {
         self.enableRichContent = enableRichContent
         self.enableMarkdown = enableMarkdown
@@ -394,6 +423,10 @@ public struct FeaturesConfig: Sendable {
         self.enableFileUpload = enableFileUpload
         self.enableFeedback = enableFeedback
         self.enableActivityUpdates = enableActivityUpdates
+        self.enableAttachments = enableAttachments
+        self.enableContactCenter = enableContactCenter
+        self.enableHistory = enableHistory
+        self.enableCitations = enableCitations
     }
 }
 
@@ -466,18 +499,23 @@ enum SDKConfigurationParser {
         let featuresMap = map["features"] as? [String: Any] ?? [:]
         let localizationMap = map["localization"] as? [String: Any] ?? [:]
         let securityMap = map["security"] as? [String: Any] ?? [:]
+        let sessionMap = map["session"] as? [String: Any] ?? [:]
+        let attachmentsMap = map["attachments"] as? [String: Any] ?? [:]
 
         var channel: ChannelConfig?
-        if let channelMap = map["channel"] as? [String: Any] {
+        let channelMap = map["channel"] as? [String: Any] ?? [:]
+        if !channelMap.isEmpty
+            || ["channel_id", "channel_name", "deployment_slug"].contains(where: { connectionMap[$0] != nil })
+        {
             channel = ChannelConfig(
-                channelId: channelMap["channel_id"] as? String,
-                channelName: channelMap["channel_name"] as? String,
-                deploymentSlug: channelMap["deployment_slug"] as? String
+                channelId: (channelMap["channel_id"] ?? connectionMap["channel_id"]) as? String,
+                channelName: (channelMap["channel_name"] ?? connectionMap["channel_name"]) as? String,
+                deploymentSlug: (channelMap["deployment_slug"] ?? connectionMap["deployment_slug"]) as? String
             )
         }
 
         var userContext: UserContextConfig?
-        if let userMap = map["user_context"] as? [String: Any] {
+        if let userMap = (map["user_context"] ?? connectionMap["user_context"]) as? [String: Any] {
             let attrs = userMap["custom_attributes"] as? [String: Any]
             userContext = UserContextConfig(
                 userId: userMap["user_id"] as? String,
@@ -500,7 +538,10 @@ enum SDKConfigurationParser {
                 projectId: connectionMap["project_id"] as? String ?? "",
                 endpoint: connectionMap["endpoint"] as? String ?? "",
                 apiKey: connectionMap["api_key"] as? String,
-                bootstrapToken: connectionMap["bootstrap_token"] as? String
+                bootstrapToken: connectionMap["bootstrap_token"] as? String,
+                clientSessionIdentifier: connectionMap["client_session_identifier"] as? Bool ?? false,
+                sessionMetadata: JSONValue.anySendableDictionary(
+                    from: connectionMap["session_metadata"] as? [String: Any])
             ),
             channel: channel,
             userContext: userContext,
@@ -510,7 +551,8 @@ enum SDKConfigurationParser {
                     maxAttempts: intValue(reconnectionMap["max_attempts"], default: 5),
                     baseDelayMs: intValue(reconnectionMap["base_delay_ms"], default: 1000),
                     maxDelayMs: intValue(reconnectionMap["max_delay_ms"], default: 30_000),
-                    exponentialBackoff: reconnectionMap["exponential_backoff"] as? Bool ?? true
+                    exponentialBackoff: reconnectionMap["exponential_backoff"] as? Bool ?? true,
+                    unlimitedTransientRetries: reconnectionMap["unlimited_transient_retries"] as? Bool ?? false
                 ),
                 idleDisconnect: IdleDisconnectConfig(
                     enabled: idleMap["enabled"] as? Bool ?? false,
@@ -582,7 +624,11 @@ enum SDKConfigurationParser {
                 enableVoice: featuresMap["enable_voice"] as? Bool ?? true,
                 enableFileUpload: featuresMap["enable_file_upload"] as? Bool ?? true,
                 enableFeedback: featuresMap["enable_feedback"] as? Bool ?? true,
-                enableActivityUpdates: featuresMap["enable_activity_updates"] as? Bool ?? false
+                enableActivityUpdates: featuresMap["enable_activity_updates"] as? Bool ?? false,
+                enableAttachments: featuresMap["enable_attachments"] as? Bool ?? false,
+                enableContactCenter: featuresMap["enable_contact_center"] as? Bool ?? false,
+                enableHistory: featuresMap["enable_history"] as? Bool ?? true,
+                enableCitations: featuresMap["enable_citations"] as? Bool ?? true
             ),
             localization: LocalizationConfig(
                 defaultLocale: localizationMap["default_locale"] as? String ?? "en",
@@ -595,7 +641,18 @@ enum SDKConfigurationParser {
                 enableCertificatePinning: securityMap["enable_certificate_pinning"] as? Bool ?? false,
                 certificatePins: securityMap["certificate_pins"] as? [String] ?? []
             ),
-            analytics: analytics
+            analytics: analytics,
+            session: SessionConfig(
+                idleDisconnectTimeoutMs: intValue(sessionMap["idle_disconnect_timeout_ms"], default: 0),
+                endSessionOnIdle: sessionMap["end_session_on_idle"] as? Bool ?? false,
+                staleSessionRefreshMs: intValue(sessionMap["stale_session_refresh_ms"], default: 0),
+                endSessionOnClose: sessionMap["end_session_on_close"] as? Bool ?? false
+            ),
+            attachments: AttachmentConfig(
+                maxFileSizeBytes: Int64(intValue(attachmentsMap["max_file_size_bytes"], default: 20 * 1024 * 1024)),
+                allowedMimeTypes: attachmentsMap["allowed_mime_types"] as? [String]
+                    ?? AttachmentConfig().allowedMimeTypes
+            )
         )
     }
 

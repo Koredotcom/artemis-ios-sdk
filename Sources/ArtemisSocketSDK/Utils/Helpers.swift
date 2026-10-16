@@ -83,13 +83,15 @@ enum WebSocketAuth {
     }
 }
 
-struct SDKSessionScope: Sendable {
-    let tenantId: String
-    let projectId: String
-    let channelId: String
-    let deploymentId: String?
-    let permissions: [String]
-    let showActivityUpdates: Bool
+public struct SDKSessionScope: Sendable {
+    public let tenantId: String
+    public let projectId: String
+    public let channelId: String
+    public let deploymentId: String?
+    public let permissions: [String]
+    public let showActivityUpdates: Bool
+    public var activityVisibilityPolicy: [String: AnySendable] = [:]
+    public var widgetConfig: WidgetConfig? = nil
 }
 
 enum JSONValue {

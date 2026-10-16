@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// Server-provided widget configuration from init/refresh response.
@@ -64,6 +65,7 @@ public struct WidgetTheme: Sendable {
     public let launcherWelcomeMessage: String?
     public let offset: Int?
     public let darkMode: Bool?
+    public let attachmentButtonEnabled: Bool
     public let raw: [String: AnySendable]
 
     init(raw: [String: Any]) {
@@ -102,6 +104,11 @@ public struct WidgetTheme: Sendable {
         self.launcherWelcomeMessage = raw["launcherWelcomeMessage"] as? String
         self.offset = Self.asInt(raw["offset"])
         self.darkMode = raw["darkMode"] as? Bool
+        let flag = raw["attachmentButtonEnabled"] as? NSNumber
+        self.attachmentButtonEnabled =
+            (flag.map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false)
+            || (raw["attachmentButtonEnabled"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "true"
     }
 
     private static func asInt(_ value: Any?) -> Int? {

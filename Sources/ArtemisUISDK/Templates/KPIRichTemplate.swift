@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ArtemisSocketSDK)
 import ArtemisSocketSDK
+#endif
 
 struct KPIRichTemplate: View {
     let kpi: KPITemplate

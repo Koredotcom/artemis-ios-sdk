@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ArtemisSocketSDK)
 import ArtemisSocketSDK
+#endif
 
 struct ChannelFallbackTemplate: View {
     let item: ChannelFallbackItem

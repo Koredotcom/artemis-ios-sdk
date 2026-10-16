@@ -15,6 +15,13 @@ public struct Message: Identifiable, Sendable {
     public let timestamp: Date
     public let metadata: [String: AnySendable]?
     public let attachmentIds: [String]?
+    public let sequence: Int?
+    public let pendingRender: Bool
+    public let status: MessageStatus
+    public let citations: [Citation]
+    public let messageSource: [String: AnySendable]?
+    public let contentEnvelope: [String: AnySendable]?
+    public let renderables: [[String: AnySendable]]
 
     public init(
         id: String,
@@ -22,7 +29,10 @@ public struct Message: Identifiable, Sendable {
         content: String,
         timestamp: Date = Date(),
         metadata: [String: AnySendable]? = nil,
-        attachmentIds: [String]? = nil
+        attachmentIds: [String]? = nil,
+        sequence: Int? = nil, pendingRender: Bool = false, status: MessageStatus = .complete,
+        citations: [Citation] = [], messageSource: [String: AnySendable]? = nil,
+        contentEnvelope: [String: AnySendable]? = nil, renderables: [[String: AnySendable]] = []
     ) {
         self.id = id
         self.role = role
@@ -30,7 +40,35 @@ public struct Message: Identifiable, Sendable {
         self.timestamp = timestamp
         self.metadata = metadata
         self.attachmentIds = attachmentIds
+        self.sequence = sequence
+        self.pendingRender = pendingRender
+        self.status = status
+        self.citations = citations
+        self.messageSource = messageSource
+        self.contentEnvelope = contentEnvelope
+        self.renderables = renderables
     }
+
+    public func replacing(
+        content: String? = nil, metadata: [String: AnySendable]? = nil,
+        pendingRender: Bool? = nil, status: MessageStatus? = nil
+    ) -> Message {
+        Message(
+            id: id, role: role, content: content ?? self.content, timestamp: timestamp,
+            metadata: metadata ?? self.metadata, attachmentIds: attachmentIds, sequence: sequence,
+            pendingRender: pendingRender ?? self.pendingRender, status: status ?? self.status,
+            citations: citations, messageSource: messageSource, contentEnvelope: contentEnvelope,
+            renderables: renderables)
+    }
+}
+
+public enum MessageStatus: String, Sendable { case accepted, streaming, complete, cancelled }
+
+public struct Citation: Sendable {
+    public let index: Int
+    public let title: String
+    public let url: URL
+    public let sourceType: String
 }
 
 /// Runtime user context override for SDK initialization.

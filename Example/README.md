@@ -6,7 +6,7 @@ The included Xcode project uses CocoaPods. Open `ArtemisUIExample.xcworkspace` a
 
 ## Swift Package Manager (separate host app)
 
-Create an iOS App target in Xcode, add the package at this repository root with **File → Add Package Dependencies → Add Local…**, and add the `ArtemisUISDK` product to the app target. The socket package is a local dependency of this package.
+Create an iOS App target in Xcode, add the package at this repository root with **File → Add Package Dependencies → Add Local…**, and add the `ArtemisUISDK` product to the app target. This package also builds its bundled `ArtemisSocketSDK` target, so a sibling socket checkout is not needed for SwiftPM.
 
 Add `ArtemisUIExampleApp.swift` and `Info.plist` to the target, replace the sample credentials, and run on an iOS 15+ simulator or device.
 
@@ -28,7 +28,18 @@ pod install
 open ArtemisUIExample.xcworkspace
 ```
 
-The Podfile links both the UI SDK and the supplied `ArtemisSocketSDK` package.
+The Podfile links the UI SDK from this repository and `ArtemisSocketSDK` from
+the separate sibling repository:
+
+```ruby
+pod 'ArtemisSocketSDK', :path => '../../artemis_ios_socket_sdk'
+pod 'ArtemisUISDK', :path => '..'
+```
+
+Run `pod install` again after updating either checkout. The example retains an
+`AgentChatHandle` for minimize/reopen and opts
+in to attachments and transferred-agent chat; Runtime branding and permissions
+still control whether the attachment button appears.
 
 If switching from Swift Package Manager produces `Unable to find module dependency: CYaml`, remove this example's stale build products from its Derived Data folder, then rebuild the workspace. Old `Yams.swiftmodule`, `ArtemisSocketSDK.swiftmodule`, and `ArtemisUISDK.swiftmodule` files can shadow the CocoaPods frameworks. Do not add a separate CYaml dependency to the CocoaPods target.
 

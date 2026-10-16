@@ -1,6 +1,8 @@
+#if canImport(ArtemisSocketSDK)
+import ArtemisSocketSDK
+#endif
 import Foundation
 import SwiftUI
-import ArtemisSocketSDK
 
 struct FormRichTemplate: View {
     let form: FormTemplate
@@ -8,6 +10,8 @@ struct FormRichTemplate: View {
     let context: RichTemplateContext
     @State private var values: [String: String] = [:]
     @State private var submitted = false
+    @State private var pending = false
+    @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -15,21 +19,34 @@ struct FormRichTemplate: View {
                 Text(title).templateTitle()
             }
             ForEach(form.fields) { field in
-                FieldView(field: field, value: binding(for: field), accentColor: context.accentColor, submitted: submitted)
+                FieldView(
+                    field: field, value: binding(for: field), accentColor: context.accentColor, submitted: submitted)
             }
             Button(form.submitLabel ?? "Submit") {
-                submitted = true
-                context.submitAction("form-submit", encodeFormSubmitPayload(resolvedValues), resolvedValues, messageId)
+                pending = true
+                error = nil
+                Task {
+                    defer { pending = false }
+                    do {
+                        try await context.perform(
+                            "form-submit", value: encodeFormSubmitPayload(resolvedValues), formData: resolvedValues,
+                            renderId: messageId)
+                        submitted = true
+                    } catch { self.error = "Form could not be sent. Please retry." }
+                }
             }
             .buttonStyle(FilledCapsuleButtonStyle(accentColor: context.accentColor))
-            .disabled(!isValid || submitted)
+            .disabled(!isValid || submitted || pending || context.submittedActionId != nil)
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .templateCard(padding: 18)
         .onAppear {
+            if values.isEmpty { values = context.presentation?.values(for: messageId) ?? [:] }
             for field in form.fields where values[field.id] == nil {
                 values[field.id] = field.value ?? ""
             }
         }
+        .onChange(of: values) { context.presentation?.save($0, for: messageId) }
     }
 
     private var resolvedValues: [String: String] {
@@ -61,7 +78,8 @@ struct FormRichTemplate: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 if !value.isEmpty {
-                                    Text(field.label + (field.required ? " *" : "")).font(.caption2.weight(.semibold)).foregroundStyle(TemplateStyle.mutedText)
+                                    Text(field.label + (field.required ? " *" : "")).font(.caption2.weight(.semibold))
+                                        .foregroundStyle(TemplateStyle.mutedText)
                                 }
                                 Text(selectedLabel)
                                     .foregroundStyle(value.isEmpty ? TemplateStyle.mutedText : TemplateStyle.text)
@@ -90,8 +108,9 @@ struct FormRichTemplate: View {
 
 private func encodeFormSubmitPayload(_ values: [String: String]) -> String {
     guard JSONSerialization.isValidJSONObject(values),
-          let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
-          let encoded = String(data: data, encoding: .utf8) else {
+        let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+        let encoded = String(data: data, encoding: .utf8)
+    else {
         return "{}"
     }
     return encoded

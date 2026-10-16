@@ -27,6 +27,7 @@ public enum SDKEvent: Sendable {
     case reconnecting(attempt: Int, maxAttempts: Int)
     case error(error: Error, code: SDKErrorCode)
     case idleTimeout(timeout: TimeInterval)
+    case sessionScopeChanged(SDKSessionScope)
 }
 
 /// Chat-specific events emitted by [AgentSDK].
@@ -38,6 +39,9 @@ public enum ChatEvent: Sendable {
     case messageEnd(messageId: String, message: Message)
     case typingIndicator(isTyping: Bool)
     case thought(content: String)
+    case activity(text: String?)
+    case responseCancelled(messageId: String?, reason: String)
+    case agentTransferChanged(AgentTransferStatus)
     case error(error: Error)
 }
 
@@ -48,7 +52,7 @@ public protocol AgentSDKDelegate: AnyObject {
     func agentSDK(_ sdk: AgentSDK, didReceive chatEvent: ChatEvent)
 }
 
-public extension AgentSDKDelegate {
-    func agentSDK(_ sdk: AgentSDK, didReceive event: SDKEvent) {}
-    func agentSDK(_ sdk: AgentSDK, didReceive chatEvent: ChatEvent) {}
+extension AgentSDKDelegate {
+    public func agentSDK(_ sdk: AgentSDK, didReceive event: SDKEvent) {}
+    public func agentSDK(_ sdk: AgentSDK, didReceive chatEvent: ChatEvent) {}
 }

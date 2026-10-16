@@ -1,7 +1,9 @@
 import Foundation
 
 extension URL {
-    var isHTTP: Bool { ["http", "https"].contains(scheme?.lowercased()) }
+    var isHTTP: Bool {
+        ["http", "https"].contains(scheme?.lowercased()) && host != nil && user == nil && password == nil
+    }
 }
 
 extension String {

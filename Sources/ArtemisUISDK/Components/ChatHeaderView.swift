@@ -4,32 +4,36 @@ struct ChatHeaderView: View {
     let title: String
     let theme: ChatTheme?
     let onClose: () -> Void
+    var statusText: String = ""
+    var onMinimize: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 12) {
             Text(String(title.trimmingCharacters(in: .whitespaces).first ?? "A"))
-                .font(.headline)
-                .foregroundStyle(headerText)
-                .frame(width: 40, height: 40)
-                .background(headerText.opacity(0.2))
-                .clipShape(Circle())
-            Text(title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(headerText)
-                .lineLimit(1)
-            Spacer()
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
+                .font(.system(size: 14, weight: .bold))
+                .frame(width: 32, height: 32)
+                .background(headerText.opacity(0.2), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                Text(statusText).font(.system(size: 11)).opacity(0.85).lineLimit(1)
             }
-            .foregroundStyle(headerText)
-            .padding(.trailing, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                if let onMinimize { control("minus", label: "Minimize chat", action: onMinimize) }
+                control("xmark", label: "Close chat", action: onClose)
+            }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 72)
-        .background(headerColor)
-        .animation(.easeInOut, value: theme?.headerBackgroundColor)
+        .foregroundStyle(headerText)
+        .padding(.leading, 16).padding(.trailing, 8).padding(.vertical, 8)
+        .frame(minHeight: 64)
+        .background(Color(hexString: theme?.headerBackgroundColor))
     }
-
-    private var headerColor: Color { Color(hexString: theme?.headerBackgroundColor) }
-    private var headerText: Color { Color(hexString: theme?.headerTextColor) }
+    private func control(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 18)).frame(width: 48, height: 48).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityLabel(label)
+    }
+    private var headerText: Color { Color(hexString: theme?.headerTextColor ?? "#FFFFFF") }
 }

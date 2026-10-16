@@ -1,6 +1,8 @@
+#if canImport(ArtemisSocketSDK)
+import ArtemisSocketSDK
+#endif
 import Foundation
 import SwiftUI
-import ArtemisSocketSDK
 
 struct MediaImageTemplate: View {
     let image: MediaContent
@@ -8,14 +10,12 @@ struct MediaImageTemplate: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let url = URL(string: image.url) {
+            if let url = URL(string: image.url), url.isHTTP {
                 Link(destination: url) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let loaded): loaded.resizable().scaledToFill()
-                        case .failure: PlaceholderIcon(systemImage: "photo", accentColor: accentColor)
-                        default: ProgressView()
-                        }
+                    TemplateRemoteImage(url: url) { loaded in
+                        loaded.resizable().scaledToFill()
+                    } placeholder: {
+                        PlaceholderIcon(systemImage: "photo", accentColor: accentColor)
                     }
                     .frame(maxWidth: .infinity, minHeight: 170, maxHeight: 230)
                     .clipShape(RoundedRectangle(cornerRadius: TemplateStyle.imageRadius))

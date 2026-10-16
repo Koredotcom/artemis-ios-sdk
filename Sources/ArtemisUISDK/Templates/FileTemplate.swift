@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ArtemisSocketSDK)
 import ArtemisSocketSDK
+#endif
 
 struct FileTemplate: View {
     let file: FileContent
