@@ -313,7 +313,7 @@ import Foundation
                 messages.removeAll { $0.id == responseID }
                 emit(.historyLoaded(messages: messages))
             }
-            if config.features.enableContactCenter, AgentTransfer.status(item) == .queued,
+            if AgentTransfer.status(item) == .queued,
                 transferStatus != .connected
             {
                 setTransfer(.queued)
@@ -411,7 +411,9 @@ import Foundation
         emit(.historyLoaded(messages: messages))
     }
     private func handleTransfer(_ raw: [String: Any]) {
-        guard config.features.enableContactCenter, currentSessionId != nil,
+        // Human-agent replies are part of the active transcript, as in the WebSDK.
+        // Optional contact-center UI configuration must not discard delivered messages.
+        guard currentSessionId != nil,
             let event = AgentTransfer.parse(raw)
         else {
             return
@@ -432,7 +434,9 @@ import Foundation
             {
                 upsert(old.replacing(content: item.content, metadata: item.metadata))
             } else {
+                let isNew = !messages.contains(where: { $0.id == item.id })
                 upsert(item)
+                if isNew { emit(.messageReceived(item)) }
             }
         }
         var next: AgentTransferStatus?
@@ -656,8 +660,7 @@ import Foundation
             }
         }
         messages = Array(messages.suffix(max(1, config.chat.maxMessagesLocal)))
-        if config.features.enableContactCenter,
-            transferAtRequest == nil || transferAtRequest == transferRevision,
+        if transferAtRequest == nil || transferAtRequest == transferRevision,
             let latest = messages.last(where: { AgentTransfer.status($0) != nil }),
             latest.timestamp >= lastTransferTransition
         {

@@ -173,16 +173,17 @@ import XCTest
         try await client.performAction(actionId: "a", value: nil, formData: nil, renderId: "r", displayText: "A")
         XCTAssertEqual(client.getMessages().map(\.content), ["A"])
     }
-    func testTransferOptInAndStaleTransitions() {
-        let (disabled, _, _) = fixture()
+    func testTransferReceivesWithoutOptInAndIgnoresStaleTransitions() {
+        let (client, _, recorder) = fixture()
         let transfer = transferFrame("agent:connected", timestamp: "2026-10-15T10:00:00Z")
-        disabled.handleServerMessage(transfer)
-        XCTAssertTrue(disabled.getMessages().isEmpty)
-        let (client, _, recorder) = fixture(contact: true)
         client.handleServerMessage(transfer)
         client.handleServerMessage(transferFrame("agent:queued", timestamp: "2026-10-15T09:00:00Z"))
         XCTAssertEqual(recorder.transfers.last, .connected)
         XCTAssertEqual(client.getMessages().count, 1)
+        client.handleServerMessage(
+            transferFrame("agent:message", data: ["message": "", "text": "Human-agent reply", "messageId": "agent-1"]))
+        XCTAssertEqual(client.getMessages().last?.content, "Human-agent reply")
+        XCTAssertEqual(recorder.messages.last?.content, "Human-agent reply")
     }
     func testTransferSuppressesAssistantStreamAndDeduplicatesProviderDelivery() async throws {
         let (client, _, recorder) = fixture(contact: true)
@@ -196,6 +197,7 @@ import XCTest
         _ = try await client.send(text: "Reply to agent")
         XCTAssertFalse(client.getMessages().contains { $0.id == "assistant" })
         XCTAssertEqual(client.getMessages().filter { $0.content == "Agent text" }.count, 1)
+        XCTAssertEqual(recorder.messages.filter { $0.content == "Agent text" }.count, 1)
         XCTAssertEqual(recorder.typing.last, false)
     }
     func testTransferFormsAndFailedAttachmentMetadata() throws {

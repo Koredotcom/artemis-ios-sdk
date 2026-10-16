@@ -213,7 +213,9 @@ It includes the title/status header, retained-handle minimize/reopen lifecycle,
 five-file draft strip, file-type icons and expandable sent-file groups. Reading
 older messages pauses automatic following; sending or tapping Latest resumes it.
 
-Runtime controls attachment availability. Transferred-agent text UI is opt-in:
+Runtime controls attachment availability. Incoming human-agent text, typing, and
+transfer status are handled automatically, matching the WebSDK. Enable optional
+contact-center form links and surveys with `enableContactCenter`:
 
 ```swift
 let configuration = SDKConfiguration(

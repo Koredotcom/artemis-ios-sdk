@@ -127,9 +127,13 @@ enum AgentTransfer {
             ].contains(type)
         else { return nil }
         let data = event["data"] as? [String: Any] ?? [:]
+        func firstNonEmpty(_ keys: [String]) -> String? {
+            keys.lazy.compactMap { data[$0] as? String }.first {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
         let date = MessageNormalizer.timestamp(event["timestamp"])
-        let providerID = MessageNormalizer.string(
-            data,
+        let providerID = firstNonEmpty(
             [
                 "providerMessageId", "idempotencyKey", "messageId", "msgId", "eventId", "requestId",
                 "attachmentId",
@@ -137,7 +141,7 @@ enum AgentTransfer {
             ])
         let fingerprint = [
             session, type, event["timestamp"] as? String ?? "",
-            MessageNormalizer.string(data, ["message", "text", "body", "closeMessage"]) ?? "",
+            firstNonEmpty(["message", "text", "body", "closeMessage"]) ?? "",
             data["linkUrl"] as? String ?? "", data["formUrl"] as? String ?? "",
         ].joined(separator: "|")
         let stable =
@@ -166,7 +170,7 @@ enum AgentTransfer {
                 metadata: metadata.merging(extra) { _, new in new }.mapValues(AnySendable.init),
                 messageSource: source)
         }
-        func text(_ keys: [String]) -> String { MessageNormalizer.string(data, keys) ?? "" }
+        func text(_ keys: [String]) -> String { firstNonEmpty(keys) ?? "" }
         var messages: [Message] = []
         switch type {
         case "agent:message": messages = [message(text(["message", "text", "body"]))]
