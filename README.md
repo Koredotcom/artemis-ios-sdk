@@ -11,7 +11,7 @@ Add this package dependency to your app's `Package.swift`, then add the `Artemis
 ```swift
 dependencies: [
     .package(
-        url: "https://github.com/Koredotcom/artemis-ios-sdk", exact: "1.0.3"
+        url: "https://github.com/Koredotcom/artemis-ios-sdk", exact: "1.0.4"
     )
 ]
 ```
@@ -174,7 +174,7 @@ three customization arguments.
 Add the published pod to the host app's `Podfile`:
 
 ```ruby
-pod 'ArtemisUISDK', '1.0.3'
+pod 'ArtemisUISDK', '1.0.4'
 ```
 
 Then run `pod install` and open the generated `.xcworkspace`.
