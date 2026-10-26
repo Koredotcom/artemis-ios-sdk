@@ -21,6 +21,15 @@ public struct AgentChatView: View {
     @State private var showPhotoPicker = false
     @State private var showCameraPicker = false
     private var strings: ChatStrings { options.strings ?? model.strings }
+    private var isOfflineConnectionError: Bool {
+        guard let message = model.errorMessage?.lowercased() else { return false }
+        let describesNetworkFailure = message.contains("internet") || message.contains("network")
+        let describesUnavailableConnection =
+            message.contains("offline") || message.contains("not connected")
+            || message.contains("unavailable") || message.contains("unreachable")
+            || message.contains("connection was lost")
+        return describesNetworkFailure && describesUnavailableConnection
+    }
     private let title: String
     private let fonts: ChatFonts?
     private let headerBuilder: ChatHeaderBuilder?
@@ -73,7 +82,22 @@ public struct AgentChatView: View {
     public var body: some View {
         VStack(spacing: 0) {
             headerView
-            if model.status == .notConnected {
+            if !model.isInternetAvailable {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .accessibilityHidden(true)
+                    Text(strings("No internet connection"))
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12))
+                .accessibilityElement(children: .combine)
+            } else if model.status == .notConnected {
                 Button(strings("Reconnect"), action: model.reconnect).font(.caption).padding(8)
             }
             ChatHistoryScrollView(
@@ -163,7 +187,8 @@ public struct AgentChatView: View {
         .alert(
             strings("Chat error"),
             isPresented: Binding(
-                get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+                get: { model.errorMessage != nil && !isOfflineConnectionError },
+                set: { if !$0 { model.errorMessage = nil } })
         ) {
             Button(strings("OK")) { model.errorMessage = nil }
         } message: {
@@ -256,14 +281,16 @@ public struct AgentChatView: View {
         if let footerBuilder {
             footerBuilder(
                 ChatFooterContext(
-                    text: $model.composeText, enabled: model.status == .connected && !model.isSending,
+                    text: $model.composeText,
+                    enabled: model.status == .connected && model.isInternetAvailable && !model.isSending,
                     placeholder: model.placeholder, theme: model.theme, onSend: model.sendComposedText,
                     onAttach: model.attachmentsAllowed ? { showAttachmentOptions = true } : nil,
                     canSend: model.canSend,
                     isUploading: model.isUploadingAttachment, pendingAttachments: model.pendingAttachments))
         } else {
             ChatFooterView(
-                text: $model.composeText, enabled: model.status == .connected && !model.isSending,
+                text: $model.composeText,
+                enabled: model.status == .connected && model.isInternetAvailable && !model.isSending,
                 canSend: model.canSend, placeholder: model.placeholder, font: fonts?.family,
                 theme: model.theme,
                 onSend: model.sendComposedText, onAttach: { showAttachmentOptions = true },

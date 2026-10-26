@@ -1,6 +1,9 @@
 import Combine
 import Foundation
 import SwiftUI
+#if os(iOS)
+    import Network
+#endif
 
 // Host apps need the socket module's initializers even with MemberImportVisibility enabled.
 // Public aliases alone expose the type names but not their members.
@@ -394,6 +397,7 @@ public enum AgentChatUI {
 @MainActor public final class AgentChatViewModel: ObservableObject {
     @Published public private(set) var messages: [Message] = []
     @Published public private(set) var status: ConnectionStatus = .notConnected
+    @Published public private(set) var isInternetAvailable = true
     @Published public private(set) var isTyping = false
     @Published public private(set) var activityText: String?
     @Published public private(set) var transferStatus: AgentTransferStatus = .none
@@ -449,6 +453,8 @@ public enum AgentChatUI {
     private var chatCancellable: AnyCancellable?
     #if os(iOS)
         private var contactCenterCancellable: AnyCancellable?
+        private var networkPathMonitor: NWPathMonitor?
+        private let networkPathMonitorQueue = DispatchQueue(label: "com.kore.artemis.chat-network")
     #endif
     private let configuration: SDKConfiguration?
     private let environment: String?
@@ -790,6 +796,9 @@ public enum AgentChatUI {
         self.runtimeUserContext = runtimeUserContext
     }
     public func start() {
+        #if os(iOS)
+            startInternetMonitoring()
+        #endif
         if let sdk {
             if !sdk.isConnected(), connectionTask == nil { connect(sdk) }
             return
@@ -979,6 +988,8 @@ public enum AgentChatUI {
         presenceTask = nil
         resetAttachments()
         #if os(iOS)
+            networkPathMonitor?.cancel()
+            networkPathMonitor = nil
             finishContactCenterCallBeforeStopping()
         #endif
         if let sdk, endingSession || sdk.configuration.session.endSessionOnClose {
@@ -1004,6 +1015,20 @@ public enum AgentChatUI {
         sentAttachments.removeAll()
         composeText = ""
     }
+    #if os(iOS)
+        private func startInternetMonitoring() {
+            guard networkPathMonitor == nil else { return }
+            let monitor = NWPathMonitor()
+            networkPathMonitor = monitor
+            monitor.pathUpdateHandler = { [weak self] path in
+                let isAvailable = path.status == .satisfied
+                Task { @MainActor [weak self] in
+                    self?.isInternetAvailable = isAvailable
+                }
+            }
+            monitor.start(queue: networkPathMonitorQueue)
+        }
+    #endif
     private func updatePolicy() {
         guard let sdk else { return }
         theme = ChatTheme(

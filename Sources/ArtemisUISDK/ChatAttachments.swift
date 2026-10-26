@@ -126,9 +126,11 @@ public struct AttachmentDraft: Identifiable, Sendable {
         }
         return values.isEmpty ? [.item] : values
     }
-    public var canAttach: Bool { status == .connected && attachmentsAllowed && !isSending }
+    public var canAttach: Bool {
+        status == .connected && isInternetAvailable && attachmentsAllowed && !isSending
+    }
     public var canSend: Bool {
-        status == .connected && !isSending
+        status == .connected && isInternetAvailable && !isSending
             && (attachmentDrafts.isEmpty
                 ? !composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 : attachmentsAllowed && attachmentDrafts.allSatisfy { $0.status == .ready })

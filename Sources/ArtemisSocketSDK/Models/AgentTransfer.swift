@@ -250,4 +250,17 @@ enum AgentTransfer {
         return
             "\(custom["transferSessionId"] ?? "")|\(custom["eventType"] ?? "")|\(provider)|\(message.content)|\(message.agentLink?.absoluteString ?? "")"
     }
+    static func replayIdentity(_ message: Message) -> String? {
+        guard let custom = message.metadata?["custom"]?.value as? [String: Any],
+            custom["source"] as? String == "agent-transfer",
+            let session = custom["transferSessionId"] as? String,
+            let eventType = custom["eventType"] as? String
+        else { return nil }
+        let timestamp = Int64((message.timestamp.timeIntervalSince1970 * 1_000).rounded(.down))
+        let attachments = message.metadata?["attachments"]?.value ?? NSNull()
+        return [
+            session, eventType, String(timestamp), message.role.rawValue, message.content,
+            message.agentLink?.absoluteString ?? "", MessageNormalizer.jsonString(attachments),
+        ].joined(separator: "|")
+    }
 }

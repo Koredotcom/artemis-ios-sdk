@@ -439,14 +439,17 @@ extension ChatClientDelegate {
                 !item.content.isEmpty || item.agentLink != nil || item.agentTransferSurvey != nil
                     || item.metadata?["attachments"] != nil
             else { continue }
-            if let identity = AgentTransfer.identity(item),
-                let old = messages.first(where: { AgentTransfer.identity($0) == identity })
-            {
+            let identity = AgentTransfer.identity(item)
+            let replayIdentity = AgentTransfer.replayIdentity(item)
+            if let old = messages.first(where: { existing in
+                existing.id == item.id
+                    || (identity != nil && AgentTransfer.identity(existing) == identity)
+                    || (replayIdentity != nil && AgentTransfer.replayIdentity(existing) == replayIdentity)
+            }) {
                 upsert(old.replacing(content: item.content, metadata: item.metadata))
             } else {
-                let isNew = !messages.contains(where: { $0.id == item.id })
                 upsert(item)
-                if isNew { emit(.messageReceived(item)) }
+                emit(.messageReceived(item))
             }
         }
         var next: AgentTransferStatus?
@@ -616,6 +619,8 @@ extension ChatClientDelegate {
     }
     func mergeHistory(_ incoming: [Message], transferAtRequest: Int? = nil) {
         var unique = Set<String>()
+        var uniqueTransferIdentities = Set<String>()
+        var uniqueTransferReplayIdentities = Set<String>()
         let expanded = incoming.flatMap { message -> [Message] in
             guard config.features.enableContactCenter,
                 let raw = message.metadata?["restoredAgentTransferSurvey"]?.value as? [String: Any],
@@ -629,9 +634,19 @@ extension ChatClientDelegate {
                     metadata: ["agentTransferSurvey": AnySendable(raw)]),
             ]
         }
-        let history = expanded.filter { unique.insert($0.id).inserted }
+        let history = expanded.filter { message in
+            guard unique.insert(message.id).inserted else { return false }
+            if let identity = AgentTransfer.identity(message),
+                !uniqueTransferIdentities.insert(identity).inserted
+            { return false }
+            if let replayIdentity = AgentTransfer.replayIdentity(message),
+                !uniqueTransferReplayIdentities.insert(replayIdentity).inserted
+            { return false }
+            return true
+        }
         let ids = Set(history.map(\.id))
         let identities = Set(history.compactMap(AgentTransfer.identity))
+        let replayIdentities = Set(history.compactMap(AgentTransfer.replayIdentity))
         let localIDs = Set(messages.map(\.id))
         var pool: [String: Int] = [:]
         for item in history where !localIDs.contains(item.id) {
@@ -640,6 +655,7 @@ extension ChatClientDelegate {
         let locals = messages.filter { item in
             if ids.contains(item.id)
                 || AgentTransfer.identity(item).map({ identities.contains($0) }) == true
+                || AgentTransfer.replayIdentity(item).map({ replayIdentities.contains($0) }) == true
             {
                 return false
             }
