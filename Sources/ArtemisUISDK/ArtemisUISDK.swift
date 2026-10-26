@@ -368,12 +368,53 @@ public enum AgentChatUI {
     #endif
 }
 
+#if os(iOS)
+    private struct ReleasedContactCenterCall {
+        let endpoint: ContactCenterCallEndpoint
+        let customer: ContactCenterCustomer
+    }
+
+    private enum ContactCenterCallSetupError: Error, LocalizedError {
+        case endpointTimedOut
+        case sbcUnavailable
+        case sbcTimedOut
+        case callEnded
+
+        var errorDescription: String? {
+            switch self {
+            case .endpointTimedOut: return "Timed out waiting for Contact Center SIP credentials"
+            case .sbcUnavailable: return "Contact Center SBC details are unavailable"
+            case .sbcTimedOut: return "Timed out waiting for Contact Center SBC details"
+            case .callEnded: return "The Contact Center call ended"
+            }
+        }
+    }
+#endif
+
 @MainActor public final class AgentChatViewModel: ObservableObject {
     @Published public private(set) var messages: [Message] = []
     @Published public private(set) var status: ConnectionStatus = .notConnected
     @Published public private(set) var isTyping = false
     @Published public private(set) var activityText: String?
     @Published public private(set) var transferStatus: AgentTransferStatus = .none
+    @Published public private(set) var contactCenterCall: ContactCenterCall?
+    #if os(iOS)
+        @Published private(set) var contactCenterCallStatus: ContactCenterCallPresentationStatus = .idle
+        @Published private(set) var contactCenterError: String?
+        @Published private(set) var contactCenterMediaController: ContactCenterCallMediaController?
+        @Published private(set) var isContactCenterMuted = false
+        @Published private(set) var isContactCenterCameraEnabled = true
+        private var contactCenterCapabilities: ContactCenterSessionCapabilities?
+        private var contactCenterSbcDetails: ContactCenterSbcDetails?
+        private var contactCenterSbcRequestId: String?
+        private var pendingAcceptedCallId: String?
+        private var releasedCallParts: [String: ReleasedContactCenterCall] = [:]
+        private var endpointReleaseCallId: String?
+        private var endpointReleaseContinuation: CheckedContinuation<ReleasedContactCenterCall, Error>?
+        private var endpointReleaseTimeout: Task<Void, Never>?
+        private var sbcDetailsContinuation: CheckedContinuation<ContactCenterSbcDetails, Error>?
+        private var sbcDetailsTimeout: Task<Void, Never>?
+    #endif
     @Published private(set) var scrollToBottomRequest = 0
     @Published private(set) var forceScrollRequest = 0
     @Published public private(set) var theme: ChatTheme?
@@ -406,6 +447,9 @@ public enum AgentChatUI {
     private var presenceTask: Task<Void, Never>?
     private var sdkCancellable: AnyCancellable?
     private var chatCancellable: AnyCancellable?
+    #if os(iOS)
+        private var contactCenterCancellable: AnyCancellable?
+    #endif
     private let configuration: SDKConfiguration?
     private let environment: String?
     private let configResource: String
@@ -434,6 +478,289 @@ public enum AgentChatUI {
         sdk?.configuration.features.enableContactCenter ?? configuration?.features.enableContactCenter
             ?? false
     }
+    #if os(iOS)
+        var shouldShowContactCenterCall: Bool {
+            contactCenterCall != nil && contactCenterCallStatus != .idle
+        }
+
+        func acceptContactCenterCall() async {
+            guard let call = contactCenterCall, contactCenterCallStatus == .incoming,
+                let sdk, sdk.isConnected()
+            else { return }
+            var accepted = false
+            do {
+                let controller = try makeContactCenterMediaController(sdk: sdk)
+                contactCenterCallStatus = .permissionPending
+                contactCenterError = nil
+                try await controller.waitUntilReady()
+                try await controller.requestPermissions(for: call.callType)
+
+                pendingAcceptedCallId = call.callId
+                try sdk.respondToContactCenterCall(.accepted, call: call)
+                accepted = true
+                contactCenterCallStatus = .connecting
+
+                let released = try await waitForEndpointRelease(callId: call.callId)
+                let sbc = try await resolveContactCenterSbc(endpoint: released.endpoint, sdk: sdk)
+                try controller.startCall(
+                    call: call, endpoint: released.endpoint, customer: released.customer, sbc: sbc)
+            } catch {
+                if contactCenterCall?.callId == call.callId,
+                    contactCenterCallStatus != .ended
+                {
+                    try? sdk.respondToContactCenterCall(
+                        accepted ? .terminated : .rejected, call: call, reason: error.localizedDescription)
+                    contactCenterMediaController?.stopCall()
+                    contactCenterMediaController = nil
+                    pendingAcceptedCallId = nil
+                    contactCenterError = error.localizedDescription
+                    contactCenterCallStatus = .error
+                }
+            }
+        }
+
+        func rejectContactCenterCall() async {
+            guard let call = contactCenterCall,
+                contactCenterCallStatus == .incoming || contactCenterCallStatus == .unavailable
+            else { return }
+            let previousStatus = contactCenterCallStatus
+            guard let sdk else {
+                contactCenterError = "The call response could not be sent because chat is disconnected."
+                return
+            }
+
+            contactCenterError = nil
+            contactCenterCallStatus = .declining
+            do {
+                try await sdk.respondToContactCenterCallAsync(.rejected, call: call, reason: "user_rejected")
+                guard contactCenterCall?.callId == call.callId, contactCenterCallStatus == .declining else {
+                    return
+                }
+                resetContactCenterCall(status: .idle)
+            } catch {
+                guard contactCenterCall?.callId == call.callId, contactCenterCallStatus == .declining else {
+                    return
+                }
+                contactCenterError = error.localizedDescription
+                contactCenterCallStatus = previousStatus
+            }
+        }
+
+        func endContactCenterCall() {
+            guard let call = contactCenterCall else { return }
+            try? sdk?.respondToContactCenterCall(.terminated, call: call, reason: "user_ended")
+            resetContactCenterCall(status: .ended, keepCall: true)
+        }
+
+        func dismissContactCenterCall() {
+            resetContactCenterCall(status: .idle)
+        }
+
+        func setContactCenterMuted(_ muted: Bool) {
+            isContactCenterMuted = muted
+            contactCenterMediaController?.setMuted(muted)
+        }
+
+        func setContactCenterCameraEnabled(_ enabled: Bool) {
+            isContactCenterCameraEnabled = enabled
+            contactCenterMediaController?.setCameraEnabled(enabled)
+        }
+
+        private func handleContactCenterEvent(_ event: ContactCenterEvent) {
+            switch event {
+            case .capabilities(let capabilities):
+                contactCenterCapabilities = capabilities
+                guard contactCenterEnabled, capabilities.enabled, capabilities.sbcDetails,
+                    contactCenterSbcRequestId == nil, let sdk
+                else { return }
+                do { contactCenterSbcRequestId = try sdk.requestContactCenterSbcDetails() }
+                catch { contactCenterError = error.localizedDescription }
+
+            case .sbcDetails(let requestId, let ready, let details):
+                if let requestId, requestId != contactCenterSbcRequestId { return }
+                if let details {
+                    contactCenterSbcDetails = details
+                    sbcDetailsTimeout?.cancel()
+                    sbcDetailsTimeout = nil
+                    sbcDetailsContinuation?.resume(returning: details)
+                    sbcDetailsContinuation = nil
+                } else if ready {
+                    failSbcDetailsWait(ContactCenterCallSetupError.sbcUnavailable)
+                }
+
+            case .incomingCall(let call):
+                guard contactCenterEnabled else { return }
+                if let existing = contactCenterCall, contactCenterCallStatus != .idle,
+                    existing.callId != call.callId
+                { return }
+                contactCenterCall = call
+                contactCenterError = nil
+                isContactCenterMuted = false
+                isContactCenterCameraEnabled = true
+                let supported = contactCenterCapabilities?.enabled == true
+                    && contactCenterCapabilities?.sbcDetails == true
+                if !supported {
+                    contactCenterError = contactCenterCapabilities?.disabledReason
+                        ?? "Contact Center calls are not enabled for this session."
+                    contactCenterCallStatus = .unavailable
+                } else if call.callType == .video, contactCenterCapabilities?.agentVideo == false {
+                    contactCenterError = "Video calling is not enabled for this session."
+                    contactCenterCallStatus = .unavailable
+                } else {
+                    contactCenterCallStatus = .incoming
+                }
+
+            case .endpointReleased(let callId, let endpoint, let customer):
+                guard pendingAcceptedCallId == callId else { return }
+                let released = ReleasedContactCenterCall(endpoint: endpoint, customer: customer)
+                if endpointReleaseCallId == callId, let continuation = endpointReleaseContinuation {
+                    endpointReleaseTimeout?.cancel()
+                    endpointReleaseTimeout = nil
+                    endpointReleaseCallId = nil
+                    endpointReleaseContinuation = nil
+                    continuation.resume(returning: released)
+                } else {
+                    releasedCallParts[callId] = released
+                }
+
+            case .callTerminated(let callId, let reason):
+                guard let call = contactCenterCall,
+                    callId == nil || callId == call.callId
+                else { return }
+                cancelEndpointRelease(with: ContactCenterCallSetupError.callEnded)
+                pendingAcceptedCallId = nil
+                contactCenterError = reason
+                resetContactCenterCall(status: .ended, keepCall: true)
+            }
+        }
+
+        private func makeContactCenterMediaController(sdk: AgentSDK) throws -> ContactCenterCallMediaController {
+            if let contactCenterMediaController { return contactCenterMediaController }
+            let controller = try ContactCenterCallMediaController(
+                endpoint: sdk.configuration.connection.endpoint,
+                scriptURLOverride: sdk.configuration.contactCenter.sipStackUrl)
+            controller.onEvent = { [weak self, weak controller] event in
+                guard let self, let controller, self.contactCenterMediaController === controller else { return }
+                switch event {
+                case .ready: break
+                case .connected:
+                    self.contactCenterCallStatus = .inCall
+                case .terminated:
+                    self.resetContactCenterCall(status: .ended, keepCall: true)
+                case .failed(let message):
+                    if let call = self.contactCenterCall,
+                        self.pendingAcceptedCallId == call.callId
+                    {
+                        try? self.sdk?.respondToContactCenterCall(.terminated, call: call, reason: message)
+                    }
+                    self.contactCenterError = message
+                    self.resetContactCenterCall(status: .error, keepCall: true)
+                }
+            }
+            contactCenterMediaController = controller
+            return controller
+        }
+
+        private func waitForEndpointRelease(callId: String) async throws -> ReleasedContactCenterCall {
+            if let released = releasedCallParts.removeValue(forKey: callId) { return released }
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<ReleasedContactCenterCall, Error>) in
+                endpointReleaseCallId = callId
+                endpointReleaseContinuation = continuation
+                endpointReleaseTimeout?.cancel()
+                endpointReleaseTimeout = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: 20_000_000_000) } catch { return }
+                    guard self?.endpointReleaseCallId == callId else { return }
+                    self?.cancelEndpointRelease(with: ContactCenterCallSetupError.endpointTimedOut)
+                }
+            }
+        }
+
+        private func resolveContactCenterSbc(
+            endpoint: ContactCenterCallEndpoint, sdk: AgentSDK
+        ) async throws -> ContactCenterSbcDetails {
+            let uriDomain = endpoint.sipURI?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "^sips?:", with: "", options: .regularExpression)
+                .split(separator: "@", maxSplits: 1).dropFirst().first
+                .map { String($0).split(whereSeparator: { ";:>".contains($0) }).first.map(String.init) ?? String($0) }
+            let configuredDomain = endpoint.domain?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !endpoint.addresses.isEmpty,
+                let domain = (configuredDomain?.isEmpty == false ? configuredDomain : uriDomain),
+                !domain.isEmpty
+            {
+                return ContactCenterSbcDetails(
+                    addresses: endpoint.addresses, domain: domain, iceServers: endpoint.iceServers)
+            }
+            if let contactCenterSbcDetails { return contactCenterSbcDetails }
+            if contactCenterSbcRequestId == nil {
+                contactCenterSbcRequestId = try sdk.requestContactCenterSbcDetails()
+            }
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<ContactCenterSbcDetails, Error>) in
+                if let contactCenterSbcDetails {
+                    continuation.resume(returning: contactCenterSbcDetails)
+                    return
+                }
+                sbcDetailsContinuation = continuation
+                sbcDetailsTimeout?.cancel()
+                sbcDetailsTimeout = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
+                    self?.failSbcDetailsWait(ContactCenterCallSetupError.sbcTimedOut)
+                }
+            }
+        }
+
+        private func failSbcDetailsWait(_ error: Error) {
+            sbcDetailsTimeout?.cancel()
+            sbcDetailsTimeout = nil
+            sbcDetailsContinuation?.resume(throwing: error)
+            sbcDetailsContinuation = nil
+        }
+
+        private func cancelEndpointRelease(with error: Error) {
+            endpointReleaseTimeout?.cancel()
+            endpointReleaseTimeout = nil
+            endpointReleaseCallId = nil
+            endpointReleaseContinuation?.resume(throwing: error)
+            endpointReleaseContinuation = nil
+        }
+
+        private func resetContactCenterCall(
+            status: ContactCenterCallPresentationStatus, keepCall: Bool = false
+        ) {
+            cancelEndpointRelease(with: ContactCenterCallSetupError.callEnded)
+            sbcDetailsTimeout?.cancel()
+            sbcDetailsTimeout = nil
+            sbcDetailsContinuation?.resume(throwing: ContactCenterCallSetupError.callEnded)
+            sbcDetailsContinuation = nil
+            releasedCallParts.removeAll()
+            pendingAcceptedCallId = nil
+            contactCenterMediaController?.stopCall()
+            contactCenterMediaController = nil
+            contactCenterCallStatus = status
+            isContactCenterMuted = false
+            isContactCenterCameraEnabled = true
+            if !keepCall { contactCenterCall = nil }
+        }
+
+        private func finishContactCenterCallBeforeStopping() {
+            if let call = contactCenterCall {
+                switch contactCenterCallStatus {
+                case .incoming, .unavailable:
+                    try? sdk?.respondToContactCenterCall(.rejected, call: call, reason: "chat_closed")
+                case .permissionPending:
+                    let decision: ContactCenterCallDecision = pendingAcceptedCallId == call.callId
+                        ? .terminated : .rejected
+                    try? sdk?.respondToContactCenterCall(decision, call: call, reason: "chat_closed")
+                case .connecting, .inCall:
+                    try? sdk?.respondToContactCenterCall(.terminated, call: call, reason: "chat_closed")
+                default: break
+                }
+            }
+            resetContactCenterCall(status: .idle)
+        }
+    #endif
     public var thoughtsEnabled: Bool {
         guard let sdk, sdk.configuration.chat.enableThoughts, sdk.configuration.features.enableActivityUpdates,
             let scope = sdk.getSessionScope(), scope.showActivityUpdates
@@ -483,6 +810,11 @@ public enum AgentChatUI {
                 configuration: created.configuration, widgetConfig: created.getWidgetConfig())
             sdkCancellable = created.sdkEvents.sink { [weak self] event in self?.handle(event) }
             chatCancellable = created.chatEvents.sink { [weak self] event in self?.handle(event) }
+            #if os(iOS)
+                contactCenterCancellable = created.contactCenterEvents.sink { [weak self] event in
+                    self?.handleContactCenterEvent(event)
+                }
+            #endif
             connect(created)
         } catch {
             status = .notConnected
@@ -646,6 +978,9 @@ public enum AgentChatUI {
         presenceTask?.cancel()
         presenceTask = nil
         resetAttachments()
+        #if os(iOS)
+            finishContactCenterCallBeforeStopping()
+        #endif
         if let sdk, endingSession || sdk.configuration.session.endSessionOnClose {
             sdk.endSession()
             Task {
@@ -658,6 +993,9 @@ public enum AgentChatUI {
         sdk = nil
         sdkCancellable = nil
         chatCancellable = nil
+        #if os(iOS)
+            contactCenterCancellable = nil
+        #endif
         status = .notConnected
         isTyping = false
         surveys.removeAll()
@@ -695,6 +1033,12 @@ public enum AgentChatUI {
             status = .notConnected
             isTyping = false
             cancelAllUploads()
+            #if os(iOS)
+                contactCenterCapabilities = nil
+                contactCenterSbcDetails = nil
+                contactCenterSbcRequestId = nil
+                resetContactCenterCall(status: .ended)
+            #endif
         case .error(let error, let code):
             if code != .historyFetch { errorMessage = strings(error.localizedDescription) }
             if sdk?.isConnected() != true { status = .notConnected }

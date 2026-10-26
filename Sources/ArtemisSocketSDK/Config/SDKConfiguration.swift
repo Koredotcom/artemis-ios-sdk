@@ -21,6 +21,7 @@ public struct SDKConfiguration: Sendable {
     public let analytics: AnalyticsConfig?
     public let session: SessionConfig
     public let attachments: AttachmentConfig
+    public let contactCenter: ContactCenterConfig
 
     public init(
         environment: String,
@@ -40,7 +41,8 @@ public struct SDKConfiguration: Sendable {
         security: SecurityConfig = .default,
         analytics: AnalyticsConfig? = nil,
         session: SessionConfig = .init(),
-        attachments: AttachmentConfig = .init()
+        attachments: AttachmentConfig = .init(),
+        contactCenter: ContactCenterConfig = .init()
     ) {
         self.environment = environment
         self.connection = connection
@@ -60,6 +62,7 @@ public struct SDKConfiguration: Sendable {
         self.analytics = analytics
         self.session = session
         self.attachments = attachments
+        self.contactCenter = contactCenter
     }
 
     func copyWithUserContext(_ context: SDKUserContext) -> SDKConfiguration {
@@ -84,7 +87,8 @@ public struct SDKConfiguration: Sendable {
             security: security,
             analytics: analytics,
             session: session,
-            attachments: attachments
+            attachments: attachments,
+            contactCenter: contactCenter
         )
     }
 }
@@ -430,6 +434,16 @@ public struct FeaturesConfig: Sendable {
     }
 }
 
+/// Contact Center call media settings. The SIP stack URL defaults to the
+/// versioned AudioCodes asset hosted with the configured Runtime endpoint.
+public struct ContactCenterConfig: Sendable {
+    public let sipStackUrl: String?
+
+    public init(sipStackUrl: String? = nil) {
+        self.sipStackUrl = sipStackUrl
+    }
+}
+
 public struct LocalizationConfig: Sendable {
     public let defaultLocale: String
     public let supportedLocales: [String]
@@ -501,6 +515,7 @@ enum SDKConfigurationParser {
         let securityMap = map["security"] as? [String: Any] ?? [:]
         let sessionMap = map["session"] as? [String: Any] ?? [:]
         let attachmentsMap = map["attachments"] as? [String: Any] ?? [:]
+        let contactCenterMap = map["contact_center"] as? [String: Any] ?? [:]
 
         var channel: ChannelConfig?
         let channelMap = map["channel"] as? [String: Any] ?? [:]
@@ -652,7 +667,9 @@ enum SDKConfigurationParser {
                 maxFileSizeBytes: Int64(intValue(attachmentsMap["max_file_size_bytes"], default: 20 * 1024 * 1024)),
                 allowedMimeTypes: attachmentsMap["allowed_mime_types"] as? [String]
                     ?? AttachmentConfig().allowedMimeTypes
-            )
+            ),
+            contactCenter: ContactCenterConfig(
+                sipStackUrl: contactCenterMap["sip_stack_url"] as? String)
         )
     }
 

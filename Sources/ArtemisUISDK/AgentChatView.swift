@@ -145,6 +145,11 @@ public struct AgentChatView: View {
             }
             .background { ChatTranscriptBackground(theme: model.theme) }
             attachmentTray
+            #if os(iOS)
+                if model.shouldShowContactCenterCall {
+                    ContactCenterCallPanel(model: model)
+                }
+            #endif
             footerView
         }
         .environment(\.chatTheme, model.theme)

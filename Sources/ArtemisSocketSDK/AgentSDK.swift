@@ -19,6 +19,7 @@ public final class AgentSDK {
 
     private let sdkEventSubject = PassthroughSubject<SDKEvent, Never>()
     private let chatEventSubject = PassthroughSubject<ChatEvent, Never>()
+    private let contactCenterEventSubject = PassthroughSubject<ContactCenterEvent, Never>()
 
     /// Delegate for receiving SDK and chat events on the main actor.
     public weak var delegate: AgentSDKDelegate?
@@ -31,6 +32,11 @@ public final class AgentSDK {
     /// Combine publisher for chat events.
     public var chatEvents: AnyPublisher<ChatEvent, Never> {
         chatEventSubject.eraseToAnyPublisher()
+    }
+
+    /// Publisher for Contact Center call invitations, capabilities, and call lifecycle events.
+    public var contactCenterEvents: AnyPublisher<ContactCenterEvent, Never> {
+        contactCenterEventSubject.eraseToAnyPublisher()
     }
 
     /// Loaded configuration (read-only).
@@ -274,6 +280,60 @@ public final class AgentSDK {
                 "sessionId": getSessionId() ?? "",
             ]))
     }
+
+    /// Request the Contact Center SBC fallback for this session.
+    /// A call-specific SIP endpoint takes precedence when Runtime supplies one.
+    @discardableResult
+    public func requestContactCenterSbcDetails(requestId: String = UUID().uuidString) throws -> String {
+        guard config.features.enableContactCenter else { throw AgentSDKError.contactCenterDisabled }
+        guard isConnected(), let sessionId = getSessionId() else { throw AgentSDKError.notConnected }
+        try sessionManager.send(
+            .raw([
+                "type": "contact_center.sbc_details_request",
+                "sessionId": sessionId,
+                "requestId": requestId,
+            ]))
+        return requestId
+    }
+
+    /// Send the Web SDK compatible accept, reject, or terminate decision for an agent call.
+    public func respondToContactCenterCall(
+        _ decision: ContactCenterCallDecision, call: ContactCenterCall, reason: String? = nil
+    ) throws {
+        guard config.features.enableContactCenter else { throw AgentSDKError.contactCenterDisabled }
+        guard isConnected(), let sessionId = getSessionId() else { throw AgentSDKError.notConnected }
+        try sessionManager.send(.raw(contactCenterCallResponsePayload(
+            decision, call: call, sessionId: sessionId, reason: reason)))
+    }
+
+    /// Send a Contact Center call decision and wait for the WebSocket send to finish.
+    /// Use this when the caller must not dismiss the call UI before its response is queued.
+    public func respondToContactCenterCallAsync(
+        _ decision: ContactCenterCallDecision, call: ContactCenterCall, reason: String? = nil
+    ) async throws {
+        guard config.features.enableContactCenter else { throw AgentSDKError.contactCenterDisabled }
+        guard isConnected(), let sessionId = getSessionId() else { throw AgentSDKError.notConnected }
+        try await sessionManager.sendAsync(.raw(contactCenterCallResponsePayload(
+            decision, call: call, sessionId: sessionId, reason: reason)))
+    }
+
+    private func contactCenterCallResponsePayload(
+        _ decision: ContactCenterCallDecision, call: ContactCenterCall,
+        sessionId: String, reason: String?
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "type": "contact_center.call_response",
+            "sessionId": sessionId,
+            "callId": call.callId,
+            "mediaSessionId": call.mediaSessionId,
+            "decision": decision.rawValue,
+            "callType": call.callType.rawValue,
+        ]
+        if let conversationId = call.conversationId { payload["conversationId"] = conversationId }
+        if let reason, !reason.isEmpty { payload["reason"] = reason }
+        return payload
+    }
+
     public func performAction(
         _ actionId: String, value: String? = nil, formData: [String: String]? = nil,
         renderId: String? = nil, displayText: String? = nil
@@ -334,6 +394,10 @@ public final class AgentSDK {
         delegate?.agentSDK(self, didReceive: event)
     }
 
+    private func emitContactCenter(_ event: ContactCenterEvent) {
+        contactCenterEventSubject.send(event)
+    }
+
     private func unwrapStageError(_ error: Error) -> Error {
         if let staged = error as? SdkStageError {
             return staged.cause
@@ -381,6 +445,9 @@ extension AgentSDK: SessionManagerDelegate {
 
 extension AgentSDK: ChatClientDelegate {
     func chatClient(_ client: ChatClient, didReceive event: ChatEvent) { emitChat(event) }
+    func chatClient(_ client: ChatClient, didReceive contactCenterEvent: ContactCenterEvent) {
+        emitContactCenter(contactCenterEvent)
+    }
     func chatClient(_ client: ChatClient, didFailHistoryHydration error: Error) {
         emitSDK(.error(error: error, code: .historyFetch))
     }
@@ -390,12 +457,14 @@ public enum AgentSDKError: Error, LocalizedError {
     case notInitialized
     case notConnected
     case missingSessionId
+    case contactCenterDisabled
 
     public var errorDescription: String? {
         switch self {
         case .notInitialized: return "SDK not initialized. Call AgentSDK.initialize() first."
         case .notConnected: return "SDK not connected. Call connect() first."
         case .missingSessionId: return "Connected but session ID was not returned"
+        case .contactCenterDisabled: return "Contact Center is not enabled in SDK configuration"
         }
     }
 }

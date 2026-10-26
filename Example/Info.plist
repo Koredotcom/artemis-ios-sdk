@@ -17,7 +17,9 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Use the camera to add photos to your conversation.</string>
+	<string>Use the camera for video calls and to add photos to your conversation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Use the microphone to talk with a human agent during audio and video calls.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

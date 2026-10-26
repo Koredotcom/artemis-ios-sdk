@@ -245,16 +245,34 @@ individual progress, cancel, retry and remove controls. Failed sends retain the
 batch and text. Signed download URLs are resolved only when opening a file; a
 server-local storage URL uses the authenticated delivery-URL route instead.
 
+### Agent audio and video calls
+
+Set `FeaturesConfig(enableContactCenter: true)` to show incoming agent call
+controls. Runtime must also enable Contact Center and provide the session call
+capabilities. The native chat supports accepting or declining calls, audio and
+video, mute, camera toggle, and hangup. The call uses the same AudioCodes WebRTC
+stack and SIP signaling values as the Web SDK.
+
+The default AudioCodes bundle URL is
+`<connection.endpoint>/api/sdk/assets/contact-center/ac_webrtc-1.19.0.min.js`.
+Set `ContactCenterConfig(sipStackUrl: "https://your-host/ac_webrtc.min.js")`
+when your Runtime host serves that asset elsewhere. A YAML configuration can
+use `contact_center.sip_stack_url`. The host app's `Info.plist` must include
+`NSMicrophoneUsageDescription`; video calls also require
+`NSCameraUsageDescription`. The example app includes both entries.
+The Runtime and SIP asset must use HTTPS; HTTP is accepted only for loopback
+development hosts such as `localhost`.
+
 Transferred-agent support includes queue/connection notices, plain-text messages,
 typing, safe external forms, scoped attachments, failed-delivery indicators and
 NPS/CSAT/like-dislike surveys. Survey success requires its matching transfer-survey
 acknowledgment; ordinary feedback acknowledgments cannot complete it. Survey
 definitions absent from Runtime history still require server event replay after
-an offline close. Agent voice/video calls, screen sharing, co-browsing, AI voice,
-OAuth cards, omnichannel continuity and outbound calling are outside this commit's
-scope. Generic rich feedback supports thumbs and star ratings with retryable
-acknowledgment states; unsupported scale/text templates show an availability
-message instead of sending an incorrect rating type.
+an offline close. Screen sharing, co-browsing, AI voice, OAuth cards, omnichannel
+continuity and outbound calling are outside this commit's scope. Generic rich
+feedback supports thumbs and star ratings with retryable acknowledgment states;
+unsupported scale/text templates show an availability message instead of sending
+an incorrect rating type.
 
 These are local source changes, not a published release. This repository contains
 the matching `ArtemisSocketSDK` source under `Sources/ArtemisSocketSDK`. SwiftPM

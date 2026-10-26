@@ -161,9 +161,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ArtemisUIExample/Pods-ArtemisUIExample-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-ArtemisUIExample/Pods-ArtemisUIExample-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -210,6 +214,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7FD7C88512345039D441334D /* Pods-ArtemisUIExample.debug.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = TUE6KHKZ4Z;
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.ArtemisUIExample;
@@ -224,6 +229,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 6C7329F2B5CFCDB023A985A6 /* Pods-ArtemisUIExample.release.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = TUE6KHKZ4Z;
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.ArtemisUIExample;
@@ -270,7 +276,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = A10000000000000000000031 /* Project object */;
 }

@@ -2,7 +2,12 @@ import Foundation
 
 @MainActor protocol ChatClientDelegate: AnyObject {
     func chatClient(_ client: ChatClient, didReceive event: ChatEvent)
+    func chatClient(_ client: ChatClient, didReceive contactCenterEvent: ContactCenterEvent)
     func chatClient(_ client: ChatClient, didFailHistoryHydration error: Error)
+}
+
+extension ChatClientDelegate {
+    func chatClient(_ client: ChatClient, didReceive contactCenterEvent: ContactCenterEvent) {}
 }
 
 /// Owns transcript state independently of its SwiftUI presentation.
@@ -250,6 +255,11 @@ import Foundation
     func handleServerMessage(_ message: TransportServerMessage) {
         let raw = message.raw
         let id = raw["messageId"] as? String
+        if config.features.enableContactCenter,
+            let event = ContactCenterEventNormalizer.normalize(message)
+        {
+            delegate?.chatClient(self, didReceive: event)
+        }
         switch message.type {
         case "session_start":
             guard let session = raw["sessionId"] as? String, !session.isEmpty else { return }
