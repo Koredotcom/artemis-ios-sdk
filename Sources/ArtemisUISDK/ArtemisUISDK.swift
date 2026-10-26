@@ -830,6 +830,12 @@ public enum AgentChatUI {
             errorMessage = strings(error.localizedDescription)
         }
     }
+    func refreshAfterForeground() {
+        start()
+        guard let sdk else { return }
+        messages = sdk.getMessages()
+        sdk.refreshHistory()
+    }
     private func connect(_ sdk: AgentSDK) {
         status = .connecting
         connectionTask = Task { [weak self, weak sdk] in

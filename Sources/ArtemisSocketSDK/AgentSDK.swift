@@ -352,6 +352,12 @@ public final class AgentSDK {
         chatClient.getMessages()
     }
 
+    /// Refresh persisted messages for the active session, such as when the app returns to foreground.
+    public func refreshHistory() {
+        guard isConnected() else { return }
+        chatClient.hydratePersistedHistory()
+    }
+
     /// Merge session-scoped custom data into all subsequent outgoing messages.
     public func updateCustomData(_ customData: [String: Any]) {
         chatClient.updateCustomData(customData)

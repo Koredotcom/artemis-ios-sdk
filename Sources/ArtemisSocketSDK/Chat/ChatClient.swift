@@ -20,6 +20,7 @@ extension ChatClientDelegate {
     private var pendingFeedback: [String: PendingFeedback] = [:]
     private var pendingSurveys: [String: PendingFeedback] = [:]
     private var historyTask: Task<Void, Never>?
+    private var historyRefreshRequested = false
     private var historyGeneration = 0
     private var currentSessionId: String?
     private var redaction = false
@@ -232,6 +233,7 @@ extension ChatClientDelegate {
         historyGeneration += 1
         historyTask?.cancel()
         historyTask = nil
+        historyRefreshRequested = false
         for key in Array(pendingFeedback.keys) {
             finishAck(key: key, survey: false, result: .failure(ChatClientError.notConnected))
         }
@@ -563,13 +565,24 @@ extension ChatClientDelegate {
     private func emit(_ event: ChatEvent) { delegate?.chatClient(self, didReceive: event) }
 
     func hydratePersistedHistory() {
-        guard config.features.enableHistory, let id = sessionManager.getSessionId(), historyTask == nil
-        else { return }
+        guard config.features.enableHistory, let id = sessionManager.getSessionId() else { return }
+        guard historyTask == nil else {
+            historyRefreshRequested = true
+            return
+        }
         let epoch = historyGeneration
         let transferAtRequest = transferRevision
         historyTask = Task { [weak self] in
             guard let self else { return }
-            defer { if epoch == self.historyGeneration { self.historyTask = nil } }
+            defer {
+                if epoch == self.historyGeneration {
+                    self.historyTask = nil
+                    if self.historyRefreshRequested {
+                        self.historyRefreshRequested = false
+                        self.hydratePersistedHistory()
+                    }
+                }
+            }
             do {
                 let fetched = try await self.fetchHistory(sessionId: id)
                 guard !Task.isCancelled, epoch == self.historyGeneration,

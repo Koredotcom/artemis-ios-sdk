@@ -16,6 +16,7 @@ public struct AgentChatView: View {
     private var options: ChatUIOptions { providedOptions ?? environmentOptions }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showAttachmentOptions = false
     @State private var showFilePicker = false
     @State private var showPhotoPicker = false
@@ -245,6 +246,9 @@ public struct AgentChatView: View {
             model.updateAppearance(isDark: colorScheme == .dark)
         }
         .onDisappear { if handle?.isMinimized != true { model.stop() } }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { model.refreshAfterForeground() }
+        }
         .onChange(of: colorScheme) { model.updateAppearance(isDark: $0 == .dark) }
         .background(Color(hexString: model.theme?.backgroundColor ?? "#FFFFFF"))
         .onChange(of: model.composeText) { _ in model.composerChanged() }
