@@ -500,7 +500,13 @@ public enum AgentChatUI {
                 contactCenterCallStatus = .permissionPending
                 contactCenterError = nil
                 try await controller.waitUntilReady()
+                guard contactCenterCall?.callId == call.callId,
+                    contactCenterCallStatus == .permissionPending
+                else { return }
                 try await controller.requestPermissions(for: call.callType)
+                guard contactCenterCall?.callId == call.callId,
+                    contactCenterCallStatus == .permissionPending
+                else { return }
                 isContactCenterSpeakerEnabled = call.callType == .video
 
                 pendingAcceptedCallId = call.callId
@@ -509,7 +515,13 @@ public enum AgentChatUI {
                 contactCenterCallStatus = .connecting
 
                 let released = try await waitForEndpointRelease(callId: call.callId)
+                guard contactCenterCall?.callId == call.callId,
+                    contactCenterCallStatus == .connecting
+                else { return }
                 let sbc = try await resolveContactCenterSbc(endpoint: released.endpoint, sdk: sdk)
+                guard contactCenterCall?.callId == call.callId,
+                    contactCenterCallStatus == .connecting
+                else { return }
                 try controller.startCall(
                     call: call, endpoint: released.endpoint, customer: released.customer, sbc: sbc)
             } catch {

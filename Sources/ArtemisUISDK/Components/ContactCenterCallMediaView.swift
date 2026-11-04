@@ -304,13 +304,85 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
         let literal = String(scriptLiteral.dropFirst().dropLast())
         return """
             <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-            <style>html,body{margin:0;width:100%;height:100%;background:#090d12;overflow:hidden}#stage{position:relative;width:100%;height:100%;min-height:150px;background:#090d12}video{background:#090d12}#remote{width:100%;height:100%;object-fit:contain}#local{position:absolute;right:16px;bottom:160px;width:27%;max-width:120px;max-height:35%;object-fit:cover;border:1px solid #ffffff66;border-radius:10px}#local[hidden]{display:none}</style>
-            </head><body><div id="stage"><video id="remote" autoplay playsinline></video><video id="local" autoplay muted playsinline hidden></video></div>
+            <style>html,body{margin:0;width:100%;height:100%;background:#090d12;overflow:hidden}#stage{position:relative;width:100%;height:100%;min-height:150px;background:#090d12}video{background:#090d12}#remote{width:100%;height:100%;object-fit:contain}#local{position:absolute;right:16px;bottom:160px;width:27%;max-width:120px;max-height:35%;object-fit:cover;border:1px solid #ffffff66;border-radius:10px;z-index:2;touch-action:none;transition:transform .32s cubic-bezier(.22,.8,.25,1),opacity .22s ease;will-change:transform,opacity}#stage.self-view-hidden-right #local{transform:translateX(calc(100% + 28px));opacity:0;pointer-events:none}#stage.self-view-hidden-left #local{transform:translateX(calc(-100% - 28px));opacity:0;pointer-events:none}#local[hidden]{display:none}#selfViewToggle{display:none;position:absolute;z-index:3;right:0;bottom:220px;width:26px;height:44px;align-items:center;justify-content:center;padding:0;border:1px solid #ffffff55;border-right:0;border-radius:11px 0 0 11px;background:#151922cc;color:white;font:20px/1 system-ui,sans-serif;touch-action:none;-webkit-appearance:none;appearance:none}#stage.self-view-hidden-left #selfViewToggle{left:0;right:auto;border-left:0;border-right:1px solid #ffffff55;border-radius:0 11px 11px 0}#stage.self-view-hidden-left #selfViewToggle,#stage.self-view-hidden-right #selfViewToggle{display:flex}@media(prefers-reduced-motion:reduce){#local{transition:none}}</style>
+            </head><body><div id="stage"><video id="remote" autoplay playsinline></video><video id="local" autoplay muted playsinline hidden></video><button id="selfViewToggle" type="button" aria-label="Show self-view" title="Show self-view">&#x2039;</button></div>
             <script>
             (() => {
               const post = (type, value = {}) => { try { window.webkit.messageHandlers.contactCenter.postMessage({type, ...value}); } catch (_) {} };
               let phone = null, activeCall = null, loginPromise = null, loginResolve = null, loginReject = null, stopping = false;
-              const remote = document.getElementById('remote'), local = document.getElementById('local');
+              const stage = document.getElementById('stage'), remote = document.getElementById('remote'), local = document.getElementById('local'), selfViewToggle = document.getElementById('selfViewToggle');
+              let selfViewGesture = null;
+              const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+              const setSelfViewHidden = (hidden, side) => {
+                if (hidden) {
+                  const stageRect = stage.getBoundingClientRect(), previewRect = local.getBoundingClientRect();
+                  const toggleTop = clamp(previewRect.top - stageRect.top + previewRect.height / 2 - 22, 8, Math.max(8, stage.clientHeight - 52));
+                  selfViewToggle.style.top = toggleTop + 'px';
+                  selfViewToggle.style.bottom = 'auto';
+                  selfViewToggle.style.left = side === 'left' ? '0' : 'auto';
+                  selfViewToggle.style.right = side === 'right' ? '0' : 'auto';
+                  selfViewToggle.textContent = side === 'left' ? '›' : '‹';
+                } else {
+                  selfViewToggle.style.top = '';
+                  selfViewToggle.style.bottom = '';
+                  selfViewToggle.style.left = '';
+                  selfViewToggle.style.right = '';
+                }
+                stage.classList.toggle('self-view-hidden', hidden);
+                stage.classList.toggle('self-view-hidden-left', hidden && side === 'left');
+                stage.classList.toggle('self-view-hidden-right', hidden && side === 'right');
+                selfViewToggle.setAttribute('aria-label', hidden ? 'Show self-view' : 'Hide self-view');
+                selfViewToggle.setAttribute('title', hidden ? 'Show self-view' : 'Hide self-view');
+              };
+              stage.addEventListener('touchstart', (event) => {
+                const onPreview = event.target === local || local.contains(event.target);
+                const onHandle = event.target === selfViewToggle || selfViewToggle.contains(event.target);
+                if (!onPreview && !onHandle) { selfViewGesture = null; return; }
+                const touch = event.changedTouches && event.changedTouches[0];
+                if (!touch) return;
+                const stageRect = stage.getBoundingClientRect(), previewRect = local.getBoundingClientRect();
+                selfViewGesture = {
+                  x: touch.clientX, y: touch.clientY, startedAt: Date.now(), onPreview,
+                  left: previewRect.left - stageRect.left, top: previewRect.top - stageRect.top,
+                  moved: false
+                };
+              }, {passive:true});
+              stage.addEventListener('touchmove', (event) => {
+                const gesture = selfViewGesture;
+                if (!gesture || !gesture.onPreview) return;
+                const touch = event.changedTouches && event.changedTouches[0];
+                if (!touch) return;
+                const dx = touch.clientX - gesture.x, dy = touch.clientY - gesture.y;
+                if (Math.abs(dx) + Math.abs(dy) > 6) gesture.moved = true;
+                if (!gesture.moved) return;
+                event.preventDefault();
+                const maxLeft = Math.max(8, stage.clientWidth - local.offsetWidth - 8);
+                const maxTop = Math.max(8, stage.clientHeight - local.offsetHeight - 8);
+                local.style.right = 'auto'; local.style.bottom = 'auto';
+                local.style.left = clamp(gesture.left + dx, 8, maxLeft) + 'px';
+                local.style.top = clamp(gesture.top + dy, 8, maxTop) + 'px';
+              }, {passive:false});
+              stage.addEventListener('touchend', (event) => {
+                const touch = event.changedTouches && event.changedTouches[0];
+                const gesture = selfViewGesture;
+                selfViewGesture = null;
+                if (!touch || !gesture) return;
+                const dx = touch.clientX - gesture.x, dy = touch.clientY - gesture.y;
+                const isQuickHorizontalSwipe = Date.now() - gesture.startedAt < 300
+                  && Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.2;
+                if (isQuickHorizontalSwipe) {
+                  if (gesture.onPreview) {
+                    local.style.right = 'auto'; local.style.bottom = 'auto';
+                    local.style.left = gesture.left + 'px'; local.style.top = gesture.top + 'px';
+                    setSelfViewHidden(true, dx < 0 ? 'left' : 'right');
+                  } else {
+                    const hiddenOnLeft = stage.classList.contains('self-view-hidden-left');
+                    if ((hiddenOnLeft && dx > 0) || (!hiddenOnLeft && dx < 0)) setSelfViewHidden(false);
+                  }
+                }
+              }, {passive:true});
+              stage.addEventListener('touchcancel', () => { selfViewGesture = null; }, {passive:true});
+              selfViewToggle.addEventListener('click', () => setSelfViewHidden(false));
               const script = document.createElement('script');
               script.src = \(literal);
               script.onload = () => {
@@ -323,6 +395,8 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
                 try {
                   if (phone) window.stopContactCenterCall();
                   stopping = false;
+                  local.style.left = ''; local.style.top = ''; local.style.right = '16px'; local.style.bottom = '160px';
+                  setSelfViewHidden(false);
                   phone = new AudioCodesUA();
                   loginPromise = new Promise((resolve, reject) => { loginResolve = resolve; loginReject = reject; });
                   phone.setAcLogger?.(() => {}); phone.setJsSipLogger?.(() => {});
@@ -464,7 +538,9 @@ struct ContactCenterCallPanel: View {
                 {
                     videoStage(controller: controller)
                         .ignoresSafeArea()
-                    videoScrim.ignoresSafeArea()
+                    videoScrim
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
                 }
                 VStack(spacing: 0) {
                     callTopBar(call)
