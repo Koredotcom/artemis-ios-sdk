@@ -1,20 +1,30 @@
 import SwiftUI
 
+/// Controls the color appearance used by the native chat window.
+public enum ChatAppearance: Sendable, Equatable {
+    case system
+    case light
+    case dark
+}
+
 /// Presentation options shared by the stock chat and its built-in templates.
 public struct ChatUIOptions: Sendable, Equatable {
     public var enableMessageFeedback: Bool
     public var feedbackCommentMaxLength: Int
     public var strings: ChatStrings?
     public var timestamps: MessageTimestampSettings?
+    public var appearance: ChatAppearance
 
     public init(
         enableMessageFeedback: Bool = false, feedbackCommentMaxLength: Int = 500,
-        timestamps: MessageTimestampSettings? = nil, strings: ChatStrings? = nil
+        timestamps: MessageTimestampSettings? = nil, strings: ChatStrings? = nil,
+        appearance: ChatAppearance = .light
     ) {
         self.enableMessageFeedback = enableMessageFeedback
         self.timestamps = timestamps
         self.strings = strings
         self.feedbackCommentMaxLength = min(4000, max(1, feedbackCommentMaxLength))
+        self.appearance = appearance
     }
 }
 

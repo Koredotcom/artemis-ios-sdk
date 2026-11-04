@@ -344,7 +344,7 @@ behavior as the reference:
 | Typed forms | Native date/time pickers, number/email/date/time validation, select validation and field-level errors. Date/time values retain `yyyy-MM-dd` / `HH:mm` wire formats. |
 | Markdown | Native headings, nested ordered/unordered lists, fenced code, tables, blockquotes, rules, images and inline formatting. Unsafe link schemes are disabled. |
 | UI strings | Host overrides and a host-bundle `ArtemisChat.strings` table, selected using the SDK locale configuration. English is the fallback; authored server prompts remain unchanged. |
-| Themes | Runtime font family/base size, density, background image and numeric/named bubble radius; template surfaces and text follow the effective theme. |
+| Themes | Light appearance by default, with system and dark overrides, plus Runtime font family/base size, density, background image and numeric/named bubble radius. |
 | Audio | Inline play/pause, seeking, elapsed/duration display and retry. |
 | Video | Embedded native controls, seeking and iOS fullscreen presentation. |
 | HTML | Allowlisted formatted HTML in a nonpersistent WebKit view, with content scripts, forms, frames and authored CSS disabled. Links open through the host URL action. |
@@ -356,6 +356,7 @@ Configure SwiftUI or UIKit presentation with the same options:
 let options = ChatUIOptions(
     enableMessageFeedback: true,
     feedbackCommentMaxLength: 500,
+    appearance: .light,
     timestamps: MessageTimestampSettings(
         visibility: .interaction,
         position: .below,
@@ -383,6 +384,9 @@ modifier. Omit `timestamps` to use Runtime `messageTimestampEnabled`,
 `messageTimestampTimeFormat` and `messageTimestampDateFormat` settings.
 Interaction visibility responds to a tap/hover and the accessible Show timestamp
 action. Locale and timezone formatting follow the SwiftUI environment.
+Use `appearance: .system` to follow the host color scheme or `.dark` to force
+dark appearance. Light appearance is the default and is independent of the
+host app's color scheme.
 
 UI string keys are the English source copy; validation keys use the
 `validation.*` namespace. String overrides take precedence over the host's

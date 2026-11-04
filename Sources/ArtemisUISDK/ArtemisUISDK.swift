@@ -193,7 +193,8 @@ public struct ChatTheme: Sendable {
     public let darkMode: Bool
     public let timestamps: MessageTimestampSettings
     public init(
-        configuration: SDKConfiguration, widgetConfig: WidgetConfig? = nil, systemDarkMode: Bool = false
+        configuration: SDKConfiguration, widgetConfig: WidgetConfig? = nil, systemDarkMode: Bool = false,
+        appearance: ChatAppearance = .system
     ) {
         let base = configuration.theme
         let server = widgetConfig?.theme
@@ -215,7 +216,12 @@ public struct ChatTheme: Sendable {
             $0.isHTTP ? $0 : nil
         }
         timestamps = MessageTimestampSettings(runtime: server?.raw.mapValues(\.value) ?? [:])
-        let dark = server?.darkMode ?? (base.darkMode || systemDarkMode)
+        let dark: Bool
+        switch appearance {
+        case .system: dark = server?.darkMode ?? (base.darkMode || systemDarkMode)
+        case .light: dark = false
+        case .dark: dark = true
+        }
         darkMode = dark
         func pick(_ serverValue: String?, _ fallback: String) -> String {
             serverValue?.isEmpty == false ? serverValue! : fallback
@@ -463,8 +469,14 @@ public enum AgentChatUI {
     private let runtimeUserContext: SDKUserContext?
     private var surveys: [String: SurveyPresentation] = [:]
     private var systemDarkMode = false
+    private var appearance: ChatAppearance = .light
     public func updateAppearance(isDark: Bool) {
         systemDarkMode = isDark
+        updatePolicy()
+    }
+    func configureAppearance(_ appearance: ChatAppearance, systemIsDark: Bool) {
+        self.appearance = appearance
+        systemDarkMode = systemIsDark
         updatePolicy()
     }
     public var placeholder: String {
@@ -806,12 +818,13 @@ public enum AgentChatUI {
         configuration: SDKConfiguration?, environment: String?, configResource: String,
         runtimeUserContext: SDKUserContext?,
         headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-        templateRegistry: RichTemplateRegistry? = nil
+        templateRegistry: RichTemplateRegistry? = nil, appearance: ChatAppearance = .light
     ) {
         self.configuration = configuration
         self.environment = environment
         self.configResource = configResource
         self.runtimeUserContext = runtimeUserContext
+        self.appearance = appearance
     }
     public func start() {
         #if os(iOS)
@@ -834,7 +847,8 @@ public enum AgentChatUI {
             sdk = created
             configureStrings(stringOverrides)
             theme = ChatTheme(
-                configuration: created.configuration, widgetConfig: created.getWidgetConfig())
+                configuration: created.configuration, widgetConfig: created.getWidgetConfig(),
+                appearance: appearance)
             sdkCancellable = created.sdkEvents.sink { [weak self] event in self?.handle(event) }
             chatCancellable = created.chatEvents.sink { [weak self] event in self?.handle(event) }
             #if os(iOS)
@@ -1057,7 +1071,7 @@ public enum AgentChatUI {
         guard let sdk else { return }
         theme = ChatTheme(
             configuration: sdk.configuration, widgetConfig: sdk.getWidgetConfig(),
-            systemDarkMode: systemDarkMode)
+            systemDarkMode: systemDarkMode, appearance: appearance)
         updateAttachmentPolicy(sdk.getSessionScope())
     }
     private func handle(_ event: SDKEvent) {

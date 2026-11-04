@@ -13,8 +13,7 @@ struct FileTemplate: View {
     }
 
     private var fileSubtitle: String {
-        let size = file.sizeBytes.map(Self.formatBytes)
-        return [file.mimeType, size].compactMap { $0 }.joined(separator: " · ")
+        file.sizeBytes.map(Self.formatBytes) ?? ""
     }
 
     private static func formatBytes(_ bytes: Int) -> String {

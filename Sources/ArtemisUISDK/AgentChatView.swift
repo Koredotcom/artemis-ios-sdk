@@ -14,6 +14,13 @@ public struct AgentChatView: View {
     @Environment(\.artemisChatOptions) private var environmentOptions
     private let providedOptions: ChatUIOptions?
     private var options: ChatUIOptions { providedOptions ?? environmentOptions }
+    private var preferredChatColorScheme: ColorScheme? {
+        switch options.appearance {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -52,7 +59,8 @@ public struct AgentChatView: View {
                 configuration: configuration, environment: environment, configResource: configResource,
                 runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
                 footerBuilder: footerBuilder,
-                templateRegistry: templateRegistry))
+                templateRegistry: templateRegistry,
+                appearance: uiOptions?.appearance ?? .light))
         self.title = title
         self.fonts = fonts
         self.headerBuilder = headerBuilder
@@ -70,6 +78,7 @@ public struct AgentChatView: View {
         onClose: (() -> Void)? = nil
     ) {
         _model = StateObject(wrappedValue: handle.model)
+        handle.model.configureAppearance(uiOptions?.appearance ?? .light, systemIsDark: false)
         self.handle = handle
         self.title = title
         self.fonts = fonts
@@ -245,16 +254,22 @@ public struct AgentChatView: View {
         #endif
         .task {
             handle?.reopen()
+            model.configureAppearance(options.appearance, systemIsDark: colorScheme == .dark)
             model.configureStrings(options.strings)
             model.start()
-            model.updateAppearance(isDark: colorScheme == .dark)
         }
         .onDisappear { if handle?.isMinimized != true { model.stop() } }
         .onChange(of: scenePhase) { phase in
             if phase == .active { model.refreshAfterForeground() }
         }
         .onChange(of: colorScheme) { model.updateAppearance(isDark: $0 == .dark) }
-        .background(Color(hexString: model.theme?.backgroundColor ?? "#FFFFFF"))
+        .onChange(of: options.appearance) {
+            model.configureAppearance($0, systemIsDark: colorScheme == .dark)
+        }
+        .background {
+            Color(hexString: model.theme?.backgroundColor ?? "#FFFFFF").ignoresSafeArea()
+        }
+        .preferredColorScheme(preferredChatColorScheme)
         .onChange(of: model.composeText) { _ in model.composerChanged() }
         .font(
             fonts?.family.map { .custom($0, size: model.theme?.baseFontSize ?? 16) }
