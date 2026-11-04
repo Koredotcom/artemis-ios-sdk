@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AttachmentDraftCard: View {
     @Environment(\.chatStrings) private var strings
+    @Environment(\.chatTheme) private var theme
     let draft: AttachmentDraft
     let canRetry: Bool
     let canRemove: Bool
@@ -14,9 +15,12 @@ struct AttachmentDraftCard: View {
                 FileTypeIcon(attachment: draft.attachment, isUser: false)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(draft.attachment.filename).font(.caption.weight(.semibold)).lineLimit(1)
-                    Text(statusLabel).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        .foregroundStyle(textColor)
+                    Text(statusLabel).font(.caption2).foregroundStyle(mutedTextColor).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: onRemove) { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                Button(action: onRemove) {
+                    Image(systemName: "xmark").frame(width: 44, height: 44).foregroundStyle(textColor)
+                }
                     .buttonStyle(.plain).disabled(!canRemove).accessibilityLabel(
                         strings.format("Remove {filename}", ["filename": draft.attachment.filename]))
             }
@@ -31,11 +35,15 @@ struct AttachmentDraftCard: View {
                     .disabled(!canRetry)
             }
         }
-        .padding(10).frame(width: 250, alignment: .leading)
-        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2)))
+        .padding(10).frame(width: 300, alignment: .leading)
+        .background(surfaceColor, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
         .accessibilityElement(children: .contain)
     }
+    private var textColor: Color { Color(hexString: theme?.textColor ?? "#1E293B") }
+    private var mutedTextColor: Color { Color(hexString: theme?.mutedTextColor ?? "#64748B") }
+    private var surfaceColor: Color { Color(hexString: theme?.surfaceColor ?? "#F8FAFC") }
+    private var borderColor: Color { Color(hexString: theme?.borderColor ?? "#E2E8F0") }
     private var statusLabel: String {
         switch draft.status {
         case .queued: return strings("Queued")

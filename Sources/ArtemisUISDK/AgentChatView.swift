@@ -308,7 +308,7 @@ public struct AgentChatView: View {
                     strings.format(
                         "{count} of {max} attachments",
                         ["count": String(model.attachmentDrafts.count), "max": "5"])
-                ).font(.caption).foregroundStyle(.secondary)
+                ).font(.caption).foregroundStyle(Color(hexString: model.theme?.mutedTextColor ?? "#64748B"))
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(model.attachmentDrafts) { draft in
