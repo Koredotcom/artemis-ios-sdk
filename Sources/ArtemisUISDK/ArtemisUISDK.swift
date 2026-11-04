@@ -408,6 +408,7 @@ public enum AgentChatUI {
         @Published private(set) var contactCenterMediaController: ContactCenterCallMediaController?
         @Published private(set) var isContactCenterMuted = false
         @Published private(set) var isContactCenterCameraEnabled = true
+        @Published private(set) var isContactCenterSpeakerEnabled = false
         private var contactCenterCapabilities: ContactCenterSessionCapabilities?
         private var contactCenterSbcDetails: ContactCenterSbcDetails?
         private var contactCenterSbcRequestId: String?
@@ -500,6 +501,7 @@ public enum AgentChatUI {
                 contactCenterError = nil
                 try await controller.waitUntilReady()
                 try await controller.requestPermissions(for: call.callType)
+                isContactCenterSpeakerEnabled = call.callType == .video
 
                 pendingAcceptedCallId = call.callId
                 try sdk.respondToContactCenterCall(.accepted, call: call)
@@ -511,9 +513,7 @@ public enum AgentChatUI {
                 try controller.startCall(
                     call: call, endpoint: released.endpoint, customer: released.customer, sbc: sbc)
             } catch {
-                if contactCenterCall?.callId == call.callId,
-                    contactCenterCallStatus != .ended
-                {
+                if contactCenterCall?.callId == call.callId {
                     try? sdk.respondToContactCenterCall(
                         accepted ? .terminated : .rejected, call: call, reason: error.localizedDescription)
                     contactCenterMediaController?.stopCall()
@@ -555,7 +555,7 @@ public enum AgentChatUI {
         func endContactCenterCall() {
             guard let call = contactCenterCall else { return }
             try? sdk?.respondToContactCenterCall(.terminated, call: call, reason: "user_ended")
-            resetContactCenterCall(status: .ended, keepCall: true)
+            resetContactCenterCall(status: .idle)
         }
 
         func dismissContactCenterCall() {
@@ -570,6 +570,11 @@ public enum AgentChatUI {
         func setContactCenterCameraEnabled(_ enabled: Bool) {
             isContactCenterCameraEnabled = enabled
             contactCenterMediaController?.setCameraEnabled(enabled)
+        }
+
+        func setContactCenterSpeakerEnabled(_ enabled: Bool) {
+            isContactCenterSpeakerEnabled = enabled
+            contactCenterMediaController?.setSpeakerEnabled(enabled)
         }
 
         private func handleContactCenterEvent(_ event: ContactCenterEvent) {
@@ -636,7 +641,7 @@ public enum AgentChatUI {
                 cancelEndpointRelease(with: ContactCenterCallSetupError.callEnded)
                 pendingAcceptedCallId = nil
                 contactCenterError = reason
-                resetContactCenterCall(status: .ended, keepCall: true)
+                resetContactCenterCall(status: .idle)
             }
         }
 
@@ -652,7 +657,7 @@ public enum AgentChatUI {
                 case .connected:
                     self.contactCenterCallStatus = .inCall
                 case .terminated:
-                    self.resetContactCenterCall(status: .ended, keepCall: true)
+                    self.resetContactCenterCall(status: .idle)
                 case .failed(let message):
                     if let call = self.contactCenterCall,
                         self.pendingAcceptedCallId == call.callId
@@ -747,6 +752,7 @@ public enum AgentChatUI {
             contactCenterCallStatus = status
             isContactCenterMuted = false
             isContactCenterCameraEnabled = true
+            isContactCenterSpeakerEnabled = false
             if !keepCall { contactCenterCall = nil }
         }
 
@@ -1068,7 +1074,7 @@ public enum AgentChatUI {
                 contactCenterCapabilities = nil
                 contactCenterSbcDetails = nil
                 contactCenterSbcRequestId = nil
-                resetContactCenterCall(status: .ended)
+                resetContactCenterCall(status: .idle)
             #endif
         case .error(let error, let code):
             if code != .historyFetch { errorMessage = strings(error.localizedDescription) }

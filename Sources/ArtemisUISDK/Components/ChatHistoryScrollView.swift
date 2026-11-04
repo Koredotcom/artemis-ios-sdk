@@ -23,7 +23,6 @@ private final class ChatScrollMetrics {
 /// Follows new content only while the reader is at the bottom; sending forces a follow.
 struct ChatHistoryScrollView<Content: View>: View {
     @Environment(\.chatTheme) private var theme
-    @Environment(\.chatStrings) private var strings
     let request: ChatHistoryScrollRequest
     @ViewBuilder let content: (CGFloat) -> Content
     @State private var followsLatest = true
@@ -66,18 +65,6 @@ struct ChatHistoryScrollView<Content: View>: View {
                     metrics.bottom = value
                     if metrics.dragging {
                         updateFollowing(bottom: value, viewportHeight: geometry.size.height)
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if !followsLatest {
-                        Button {
-                            followsLatest = true
-                            proxy.scrollTo(Anchor.bottom, anchor: .bottom)
-                        } label: {
-                            Label(strings("Latest"), systemImage: "arrow.down").font(.caption).padding(10)
-                                .background(
-                                    .regularMaterial, in: Capsule())
-                        }.padding(12)
                     }
                 }
                 .task(id: request) {

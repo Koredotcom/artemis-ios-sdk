@@ -35,7 +35,7 @@ struct AttachmentDraftCard: View {
                     .disabled(!canRetry)
             }
         }
-        .padding(10).frame(width: 300, alignment: .leading)
+        .padding(10).frame(width: 250, alignment: .leading)
         .background(surfaceColor, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(borderColor))
         .accessibilityElement(children: .contain)
@@ -49,7 +49,9 @@ struct AttachmentDraftCard: View {
         case .queued: return strings("Queued")
         case .uploading:
             return strings.format("Uploading {percent}%", ["percent": String(Int(draft.progress * 100))])
-        case .ready: return strings("Ready to send") + " • " + draft.attachment.detail
+        case .ready:
+            return ByteCountFormatter.string(
+                fromByteCount: draft.attachment.sizeBytes, countStyle: .file)
         case .failed: return strings("Upload failed")
         case .cancelled: return strings("Cancelled")
         }

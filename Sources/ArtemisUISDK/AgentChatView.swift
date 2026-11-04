@@ -170,12 +170,16 @@ public struct AgentChatView: View {
             }
             .background { ChatTranscriptBackground(theme: model.theme) }
             attachmentTray
+            footerView
+        }
+        .overlay {
             #if os(iOS)
                 if model.shouldShowContactCenterCall {
                     ContactCenterCallPanel(model: model)
+                        .transition(.opacity)
+                        .zIndex(1)
                 }
             #endif
-            footerView
         }
         .environment(\.chatTheme, model.theme)
         .environment(\.chatStrings, strings)

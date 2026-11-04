@@ -22,7 +22,6 @@ enum ContactCenterCallPresentationStatus: Equatable {
     case permissionPending
     case connecting
     case inCall
-    case ended
     case error
 }
 
@@ -106,8 +105,9 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
         let audio = AVAudioSession.sharedInstance()
         try audio.setCategory(
             .playAndRecord, mode: callType == .video ? .videoChat : .voiceChat,
-            options: [.allowBluetooth, .defaultToSpeaker])
+            options: [.allowBluetooth])
         try audio.setActive(true)
+        if callType == .video { try? audio.overrideOutputAudioPort(.speaker) }
         mediaCaptureAllowed = true
     }
 
@@ -166,6 +166,10 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
 
     func setCameraEnabled(_ enabled: Bool) {
         webView?.evaluateJavaScript("window.setContactCenterCameraEnabled(\(enabled));")
+    }
+
+    func setSpeakerEnabled(_ enabled: Bool) {
+        try? AVAudioSession.sharedInstance().overrideOutputAudioPort(enabled ? .speaker : .none)
     }
 
     func stopCall() {
@@ -300,7 +304,7 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
         let literal = String(scriptLiteral.dropFirst().dropLast())
         return """
             <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-            <style>html,body{margin:0;width:100%;height:100%;background:#090d12;overflow:hidden}#stage{position:relative;width:100%;height:100%;min-height:150px;background:#090d12}video{background:#090d12}#remote{width:100%;height:100%;object-fit:contain}#local{position:absolute;right:10px;bottom:10px;width:27%;max-width:120px;max-height:35%;object-fit:cover;border:1px solid #ffffff66;border-radius:10px}#local[hidden]{display:none}</style>
+            <style>html,body{margin:0;width:100%;height:100%;background:#090d12;overflow:hidden}#stage{position:relative;width:100%;height:100%;min-height:150px;background:#090d12}video{background:#090d12}#remote{width:100%;height:100%;object-fit:contain}#local{position:absolute;right:16px;bottom:160px;width:27%;max-width:120px;max-height:35%;object-fit:cover;border:1px solid #ffffff66;border-radius:10px}#local[hidden]{display:none}</style>
             </head><body><div id="stage"><video id="remote" autoplay playsinline></video><video id="local" autoplay muted playsinline hidden></video></div>
             <script>
             (() => {
@@ -400,6 +404,7 @@ struct ContactCenterCallPanel: View {
     @ObservedObject var model: AgentChatViewModel
     @Environment(\.chatTheme) private var theme
     @Environment(\.chatStrings) private var strings
+    @State private var connectedAt: Date?
 
     private var call: ContactCenterCall? { model.contactCenterCall }
     private var callerName: String? {
@@ -408,163 +413,235 @@ struct ContactCenterCallPanel: View {
         else { return nil }
         return value
     }
+    private var callerDisplayName: String { callerName ?? strings("Agent") }
     private var callKind: String { call?.callType == .video ? strings("video") : strings("audio") }
     private var callIcon: String { call?.callType == .video ? "video.fill" : "phone.fill" }
-    private var cardColor: Color { Color(hexString: theme?.surfaceColor ?? "#F3F4F6") }
-    private var textColor: Color { Color(hexString: theme?.textColor ?? "#1E293B") }
-    private var mutedTextColor: Color { Color(hexString: theme?.mutedTextColor ?? "#64748B") }
     private var accentColor: Color { Color(hexString: theme?.primaryColor ?? "#2563EB") }
-
-    var body: some View {
-        if let call {
-            VStack(alignment: .leading, spacing: 12) {
-                switch model.contactCenterCallStatus {
-                case .incoming:
-                    callHeading(
-                        title: strings.format("Incoming {type} call", ["type": callKind]),
-                        subtitle: model.contactCenterError
-                            ?? callerName.map { "\($0) is requesting a call." }
-                            ?? strings("An agent is requesting a call."),
-                        icon: callIcon
-                    )
-                    HStack(spacing: 10) {
-                        actionButton(strings("Decline"), icon: "phone.down.fill", role: .secondary) {
-                            Task { await model.rejectContactCenterCall() }
-                        }
-                        actionButton(strings("Accept"), icon: callIcon, role: .primary) {
-                            Task { await model.acceptContactCenterCall() }
-                        }
-                    }
-                case .unavailable:
-                    callHeading(
-                        title: strings("Incoming call"),
-                        subtitle: model.contactCenterError
-                            ?? strings("Contact Center calling is unavailable for this session."),
-                        icon: "phone.down.fill"
-                    )
-                    actionButton(strings("Decline"), icon: "phone.down.fill", role: .secondary) {
-                        Task { await model.rejectContactCenterCall() }
-                    }
-                case .declining:
-                    HStack(spacing: 12) {
-                        progressIcon
-                        Text(strings("Declining call…"))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(textColor)
-                    }
-                case .permissionPending:
-                    HStack(alignment: .top, spacing: 12) {
-                        progressIcon
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(strings.format("Preparing {type} call…", ["type": callKind]))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(textColor)
-                            Text(
-                                strings(
-                                    call.callType == .video
-                                        ? "Requesting microphone and camera access…"
-                                        : "Requesting microphone access…"))
-                                .font(.subheadline).foregroundStyle(mutedTextColor)
-                        }
-                        Spacer(minLength: 4)
-                        actionButton(strings("Cancel"), icon: "xmark", role: .secondary, compact: true) {
-                            model.endContactCenterCall()
-                        }
-                    }
-                    hiddenMediaHost
-                case .connecting:
-                    HStack(alignment: .top, spacing: 12) {
-                        progressIcon
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(strings.format("Connecting {type} call…", ["type": callKind]))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(textColor)
-                            Text(
-                                callerName.map {
-                                    strings.format("Connecting to {name}…", ["name": $0])
-                                } ?? strings("Connecting to an agent…"))
-                                .font(.subheadline).foregroundStyle(mutedTextColor)
-                        }
-                        Spacer(minLength: 4)
-                        actionButton(strings("Cancel"), icon: "phone.down.fill", role: .danger, compact: true) {
-                            model.endContactCenterCall()
-                        }
-                    }
-                    hiddenMediaHost
-                case .inCall:
-                    callHeading(
-                        title: strings.format("On {type} call", ["type": callKind]),
-                        subtitle: callerName ?? strings("Connected"),
-                        icon: callIcon,
-                        isConnected: true
-                    )
-                    if call.callType == .video {
-                        if let controller = model.contactCenterMediaController {
-                            videoStage(controller: controller)
-                        }
-                    } else {
-                        hiddenMediaHost
-                    }
-                    HStack(spacing: 4) {
-                        roundCallControl(
-                            model.isContactCenterMuted ? "mic.slash.fill" : "mic.fill",
-                            title: strings(model.isContactCenterMuted ? "Unmute" : "Mute"),
-                            selected: model.isContactCenterMuted
-                        ) { model.setContactCenterMuted(!model.isContactCenterMuted) }
-                        if call.callType == .video {
-                            roundCallControl(
-                                model.isContactCenterCameraEnabled ? "video.fill" : "video.slash.fill",
-                                title: strings(model.isContactCenterCameraEnabled ? "Camera off" : "Camera on"),
-                                selected: !model.isContactCenterCameraEnabled
-                            ) { model.setContactCenterCameraEnabled(!model.isContactCenterCameraEnabled) }
-                        }
-                        roundCallControl("phone.down.fill", title: strings("Hang up"), danger: true) {
-                            model.endContactCenterCall()
-                        }
-                    }
-                    .padding(.top, 2)
-                case .ended:
-                    callHeading(title: strings("Call ended"), subtitle: callerName ?? "", icon: "phone.down.fill")
-                    actionButton(strings("Close"), icon: "xmark", role: .secondary) {
-                        model.dismissContactCenterCall()
-                    }
-                case .error:
-                    callHeading(
-                        title: strings("Call failed"),
-                        subtitle: model.contactCenterError ?? strings("The call could not be connected."),
-                        icon: "exclamationmark.triangle.fill"
-                    )
-                    actionButton(strings("Dismiss"), icon: "xmark", role: .secondary) {
-                        model.dismissContactCenterCall()
-                    }
-                case .idle:
-                    EmptyView()
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                cardColor,
-                in: RoundedRectangle(cornerRadius: CGFloat(max(16, theme?.borderRadius ?? 16)))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: CGFloat(max(16, theme?.borderRadius ?? 16)))
-                    .stroke(Color(hexString: theme?.borderColor ?? "#E2E8F0"), lineWidth: 1)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"))
-            .animation(.easeInOut(duration: 0.2), value: model.contactCenterCallStatus)
+    private var stateTitle: String {
+        switch model.contactCenterCallStatus {
+        case .idle: return ""
+        case .incoming: return strings("Incoming call")
+        case .unavailable: return strings("Unavailable")
+        case .declining: return strings("Declining…")
+        case .permissionPending: return strings("Preparing call…")
+        case .connecting: return strings("Connecting…")
+        case .inCall: return strings("Connected")
+        case .error: return strings("Call failed")
+        }
+    }
+    private var participantSubtitle: String {
+        switch model.contactCenterCallStatus {
+        case .incoming:
+            return callerName.map {
+                strings.format("{name} is calling you.", ["name": $0])
+            } ?? strings("An agent is calling you.")
+        case .unavailable:
+            return model.contactCenterError ?? strings("Contact Center calling is unavailable for this session.")
+        case .declining:
+            return strings("Declining call…")
+        case .permissionPending:
+            return strings.format("Preparing {type} call…", ["type": callKind])
+        case .connecting:
+            return callerName.map {
+                strings.format("Connecting to {name}…", ["name": $0])
+            } ?? strings("Connecting to an agent…")
+        case .inCall:
+            return strings("Connected")
+        case .error:
+            return model.contactCenterError ?? strings("The call could not be connected.")
+        case .idle:
+            return ""
         }
     }
 
-    private var progressIcon: some View {
-        ZStack {
-            Circle().fill(accentColor.opacity(0.12))
-            ProgressView().tint(accentColor)
+    var body: some View {
+        if let call {
+            ZStack {
+                callBackground
+                if call.callType == .video,
+                    model.contactCenterCallStatus == .inCall,
+                    let controller = model.contactCenterMediaController
+                {
+                    videoStage(controller: controller)
+                        .ignoresSafeArea()
+                    videoScrim.ignoresSafeArea()
+                }
+                VStack(spacing: 0) {
+                    callTopBar(call)
+                    Spacer(minLength: 24)
+                    if call.callType == .audio || model.contactCenterCallStatus != .inCall {
+                        participantArtwork
+                        VStack(spacing: 8) {
+                            Text(callerDisplayName)
+                                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                            Text(participantSubtitle)
+                                .font(.system(size: 16))
+                                .foregroundStyle(Color.white.opacity(0.72))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(3)
+                        }
+                        .padding(.top, 24)
+                    }
+                    Spacer(minLength: 28)
+                    callActions(for: call)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 18)
+
+                if model.contactCenterMediaController != nil,
+                    !(call.callType == .video && model.contactCenterCallStatus == .inCall)
+                {
+                    hiddenMediaHost
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.ignoresSafeArea())
+            .preferredColorScheme(.dark)
+            .onAppear {
+                if model.contactCenterCallStatus == .inCall { connectedAt = Date() }
+            }
+            .onChange(of: model.contactCenterCallStatus) { status in
+                connectedAt = status == .inCall ? Date() : nil
+            }
+            .onChange(of: call.callId) { _ in connectedAt = nil }
+            .animation(.easeInOut(duration: 0.24), value: model.contactCenterCallStatus)
         }
-        .frame(width: 42, height: 42)
-        .accessibilityHidden(true)
+    }
+
+    private var callBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.06, green: 0.09, blue: 0.16),
+                    Color(red: 0.035, green: 0.05, blue: 0.09),
+                    Color(red: 0.015, green: 0.025, blue: 0.05),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Circle()
+                .fill(accentColor.opacity(0.22))
+                .frame(width: 300, height: 300)
+                .blur(radius: 82)
+                .offset(y: -150)
+            Circle()
+                .fill(Color.blue.opacity(0.12))
+                .frame(width: 250, height: 250)
+                .blur(radius: 84)
+                .offset(x: 160, y: 240)
+        }
+        .ignoresSafeArea()
+    }
+
+    private var videoScrim: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black.opacity(0.66), location: 0),
+                .init(color: .black.opacity(0.28), location: 0.24),
+                .init(color: .clear, location: 0.48),
+                .init(color: .black.opacity(0.28), location: 0.68),
+                .init(color: .black.opacity(0.82), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func callTopBar(_ call: ContactCenterCall) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: callIcon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(accentColor.opacity(0.8), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(strings(call.callType == .video ? "Video call" : "Audio call"))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.72))
+                    .textCase(.uppercase)
+                Text(callerDisplayName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.contactCenterCallStatus == .inCall {
+                connectedBadge
+            } else {
+                Text(stateTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.12), in: Capsule())
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var connectedBadge: some View {
+        HStack(spacing: 7) {
+            Circle().fill(Color.green).frame(width: 8, height: 8)
+            if let connectedAt {
+                TimelineView(.periodic(from: connectedAt, by: 1)) { timeline in
+                    Text(elapsedTime(since: connectedAt, now: timeline.date))
+                        .monospacedDigit()
+                }
+            } else {
+                Text("00:00").monospacedDigit()
+            }
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.white.opacity(0.12), in: Capsule())
+        .accessibilityLabel(strings("Connected"))
+    }
+
+    private func elapsedTime(since start: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var participantArtwork: some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+                .frame(width: 204, height: 204)
+            Circle()
+                .fill(accentColor.opacity(0.14))
+                .frame(width: 172, height: 172)
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [accentColor, accentColor.opacity(0.65)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 136, height: 136)
+                .shadow(color: accentColor.opacity(0.35), radius: 28, y: 10)
+            Image(systemName: "person.fill")
+                .font(.system(size: 54, weight: .medium))
+                .foregroundStyle(.white)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var hiddenMediaHost: some View {
@@ -576,92 +653,145 @@ struct ContactCenterCallPanel: View {
                     .accessibilityHidden(true)
             }
         }
-    }
-
-    private func callHeading(
-        title: String, subtitle: String, icon: String, isConnected: Bool = false
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(accentColor)
-                .frame(width: 44, height: 44)
-                .background(accentColor.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(textColor)
-                    .lineLimit(2)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(mutedTextColor)
-                        .lineLimit(2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if isConnected {
-                HStack(spacing: 5) {
-                    Circle().fill(Color.green).frame(width: 7, height: 7)
-                    Text(strings("Connected"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(mutedTextColor)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 6)
-                .background(Color.green.opacity(0.1), in: Capsule())
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        .allowsHitTesting(false)
     }
 
     private func videoStage(controller: ContactCenterCallMediaController) -> some View {
         ContactCenterCallWebView(controller: controller)
-            .frame(maxWidth: .infinity)
-            .frame(height: 200)
-            .background(Color(red: 0.04, green: 0.06, blue: 0.09))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                HStack(spacing: 6) {
-                    Circle().fill(Color.green).frame(width: 7, height: 7)
-                    Text(strings("Live video"))
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(.black.opacity(0.45), in: Capsule())
-                .padding(10)
-                .accessibilityHidden(true)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
             .accessibilityLabel(
-                strings.format("Video call with {name}", ["name": callerName ?? strings("agent")]))
+                strings.format("Video call with {name}", ["name": callerDisplayName]))
     }
 
-    private enum ActionRole: Equatable { case primary, secondary, danger }
-
-    private func actionButton(
-        _ title: String, icon: String, role: ActionRole, compact: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        let foreground: Color = role == .primary ? .white : (role == .danger ? .white : textColor)
-        let fill: Color = role == .primary ? accentColor : (role == .danger ? .red : cardColor)
-        return Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 15, weight: .semibold))
-                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-            }
-            .frame(maxWidth: compact ? nil : .infinity, minHeight: 48)
-            .padding(.horizontal, compact ? 12 : 14)
-            .foregroundStyle(foreground)
-            .background(fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                if role == .secondary {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color(hexString: theme?.borderColor ?? "#D1D5DB"), lineWidth: 1)
+    @ViewBuilder
+    private func callActions(for call: ContactCenterCall) -> some View {
+        switch model.contactCenterCallStatus {
+        case .incoming:
+            HStack(spacing: 46) {
+                incomingAction(
+                    strings("Decline"), icon: "phone.down.fill",
+                    color: Color(red: 0.88, green: 0.22, blue: 0.25)
+                ) {
+                    Task { await model.rejectContactCenterCall() }
+                }
+                incomingAction(
+                    strings("Accept"), icon: callIcon,
+                    color: Color(red: 0.12, green: 0.72, blue: 0.4)
+                ) {
+                    Task { await model.acceptContactCenterCall() }
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(maxWidth: .infinity)
+        case .unavailable:
+            callActionButton(
+                strings("Decline"), icon: "phone.down.fill",
+                color: Color(red: 0.88, green: 0.22, blue: 0.25)
+            ) {
+                Task { await model.rejectContactCenterCall() }
+            }
+        case .declining:
+            HStack(spacing: 10) {
+                ProgressView().tint(.white)
+                Text(strings("Declining call…"))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .padding(.vertical, 18)
+        case .permissionPending, .connecting:
+            callActionButton(
+                strings("Cancel"), icon: "phone.down.fill",
+                color: Color(red: 0.88, green: 0.22, blue: 0.25)
+            ) {
+                model.endContactCenterCall()
+            }
+        case .inCall:
+            liveCallControls(for: call)
+        case .error:
+            callActionButton(strings("Dismiss"), icon: "xmark", color: .white.opacity(0.16)) {
+                model.dismissContactCenterCall()
+            }
+        case .idle:
+            EmptyView()
+        }
+    }
+
+    private func incomingAction(
+        _ title: String, icon: String, color: Color, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 72, height: 72)
+                    .background(color, in: Circle())
+                    .shadow(color: color.opacity(0.28), radius: 16, y: 7)
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .frame(width: 104)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private func liveCallControls(for call: ContactCenterCall) -> some View {
+        HStack(spacing: 4) {
+            roundCallControl(
+                model.isContactCenterMuted ? "mic.slash.fill" : "mic.fill",
+                title: strings(model.isContactCenterMuted ? "Unmute" : "Mute"),
+                selected: model.isContactCenterMuted
+            ) {
+                model.setContactCenterMuted(!model.isContactCenterMuted)
+            }
+            roundCallControl(
+                model.isContactCenterSpeakerEnabled ? "speaker.wave.2.fill" : "speaker.fill",
+                title: strings(model.isContactCenterSpeakerEnabled ? "Speaker on" : "Speaker"),
+                selected: model.isContactCenterSpeakerEnabled
+            ) {
+                model.setContactCenterSpeakerEnabled(!model.isContactCenterSpeakerEnabled)
+            }
+            if call.callType == .video {
+                roundCallControl(
+                    model.isContactCenterCameraEnabled ? "video.fill" : "video.slash.fill",
+                    title: strings(model.isContactCenterCameraEnabled ? "Camera off" : "Camera on"),
+                    selected: !model.isContactCenterCameraEnabled
+                ) {
+                    model.setContactCenterCameraEnabled(!model.isContactCenterCameraEnabled)
+                }
+            }
+            roundCallControl(
+                "phone.down.fill", title: strings("End call"),
+                danger: true
+            ) {
+                model.endContactCenterCall()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+    }
+
+    private func callActionButton(
+        _ title: String, icon: String, color: Color, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+                Text(title).font(.system(size: 16, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 58)
+            .background(color, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -672,25 +802,23 @@ struct ContactCenterCallPanel: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(danger ? .white : textColor)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
                     .frame(width: 56, height: 56)
                     .background(
-                        danger ? Color.red : (selected ? accentColor.opacity(0.16) : cardColor),
+                        danger
+                            ? Color(red: 0.88, green: 0.22, blue: 0.25)
+                            : (selected ? accentColor : Color.white.opacity(0.13)),
                         in: Circle()
                     )
-                    .overlay {
-                        if !danger {
-                            Circle().stroke(Color(hexString: theme?.borderColor ?? "#D1D5DB"), lineWidth: 1)
-                        }
-                    }
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(mutedTextColor)
+                    .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -699,4 +827,5 @@ struct ContactCenterCallPanel: View {
         .accessibilityLabel(title)
     }
 }
+
 #endif
