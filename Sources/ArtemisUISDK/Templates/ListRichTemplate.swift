@@ -11,7 +11,7 @@ struct ListRichTemplate: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let title = list.title, !title.templateTrimmed.isEmpty {
-                Text(title).templateSectionLabel()
+                Text(title).templateTitle()
             }
             ForEach(Array(list.items.enumerated()), id: \.offset) { _, item in
                 HStack(spacing: 12) {
@@ -38,7 +38,7 @@ struct ListRichTemplate: View {
                     }
                 }
                 .padding(14)
-                .templateCard()
+                .templateCard(padding: 0)
             }
         }
     }

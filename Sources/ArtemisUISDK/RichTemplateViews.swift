@@ -30,7 +30,9 @@ struct RichContentTemplatesView: View {
                     MediaImageTemplate(image: image, accentColor: context.accentColor)
                 }
                 if !isSuppressed(RichTemplateTypes.video), let video = richContent?.video {
-                    VideoRichTemplate(media: video, accentColor: context.accentColor)
+                    VideoRichTemplate(
+                        media: video, accentColor: context.accentColor,
+                        presentation: context.presentation)
                 }
                 if !isSuppressed(RichTemplateTypes.audio), let audio = richContent?.audio {
                     AudioRichTemplate(media: audio, accentColor: context.accentColor)

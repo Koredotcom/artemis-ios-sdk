@@ -34,9 +34,17 @@ struct CarouselRichTemplate: View {
                             .clipped()
                         }
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(card.title).templateTitle().lineLimit(2)
+                            Text(card.title)
+                                .templateTitle()
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             if let subtitle = card.subtitle, !subtitle.templateTrimmed.isEmpty {
-                                Text(subtitle).templateBody().lineLimit(3)
+                                Text(subtitle)
+                                    .templateBody()
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             if let rawURL = card.defaultActionURL, let url = URL(string: rawURL), url.isHTTP {
                                 Link("Open", destination: url).outlinedPill(accentColor: accentColor)
@@ -66,15 +74,20 @@ struct CarouselRichTemplate: View {
                                 .buttonStyle(
                                     OutlinedPillButtonStyle(
                                         accentColor: accentColor,
-                                        isSelected: (selected ?? context?.submittedActionId) == button.id)
+                                        isSelected: (selected ?? context?.submittedActionId) == button.id,
+                                        expandsToFullWidth: false,
+                                        horizontalPadding: 12,
+                                        minHeight: 34)
                                 )
                                 .disabled(pending || selected != nil || context?.submittedActionId != nil)
                             }
                         }
-                        .padding(14)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
                     }
                     .frame(width: 220, alignment: .leading)
-                    .templateCard()
+                    .templateCard(padding: 0)
                 }
             }
             .padding(.vertical, 2)

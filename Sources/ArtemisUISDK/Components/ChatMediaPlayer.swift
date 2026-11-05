@@ -26,12 +26,14 @@ private final class MediaTimeObservation {
         guard let url = URL(string: value), url.isHTTP else { return nil }
         return url
     }
-    func load(_ value: String) {
-        dispose()
+    func load(_ value: String, force: Bool = false) {
         guard let url = Self.safeURL(value) else {
+            dispose()
             failed = true
             return
         }
+        if !force, source == url, player != nil { return }
+        dispose()
         source = url
         failed = false
         elapsed = 0
@@ -91,6 +93,7 @@ private final class MediaTimeObservation {
         playbackObserver = nil
         player?.replaceCurrentItem(with: nil)
         player = nil
+        source = nil
         playing = false
     }
     private func updateDuration(_ item: AVPlayerItem) {
@@ -102,25 +105,62 @@ private final class MediaTimeObservation {
 #if os(iOS)
     private struct NativeVideoControls: UIViewControllerRepresentable {
         let player: AVPlayer
+        let onFullscreenChanged: (Bool) -> Void
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(onFullscreenChanged: onFullscreenChanged)
+        }
+
         func makeUIViewController(context: Context) -> AVPlayerViewController {
             let controller = AVPlayerViewController()
             controller.player = player
             controller.showsPlaybackControls = true
+            controller.delegate = context.coordinator
             return controller
         }
         func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
             controller.player = player
+            controller.delegate = context.coordinator
+            context.coordinator.onFullscreenChanged = onFullscreenChanged
         }
-        static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: ()) {
-            controller.player = nil
+        static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+            controller.delegate = nil
+        }
+
+        final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
+            var onFullscreenChanged: (Bool) -> Void
+
+            init(onFullscreenChanged: @escaping (Bool) -> Void) {
+                self.onFullscreenChanged = onFullscreenChanged
+            }
+
+            func playerViewController(
+                _ playerViewController: AVPlayerViewController,
+                willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+            ) {
+                onFullscreenChanged(true)
+                coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                    if context.isCancelled { self?.onFullscreenChanged(false) }
+                }
+            }
+
+            func playerViewController(
+                _ playerViewController: AVPlayerViewController,
+                willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+            ) {
+                coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                    if !context.isCancelled { self?.onFullscreenChanged(false) }
+                }
+            }
         }
     }
 #endif
 
 struct InlineVideoPlayer: View {
     let media: MediaContent
+    var displayCaption: String? = nil
+    var presentation: ChatPresentationState? = nil
     @StateObject private var model = ChatMediaPlayer()
-    @State private var fullscreen = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.chatStrings) private var strings
     var body: some View {
@@ -128,34 +168,31 @@ struct InlineVideoPlayer: View {
             if model.failed {
                 Text(strings("Unable to play this media.")).font(.caption)
                 if ChatMediaPlayer.safeURL(media.url) != nil {
-                    Button(strings("Retry")) { model.load(media.url) }
+                    Button(strings("Retry")) { model.load(media.url, force: true) }
                 }
             } else if let player = model.player {
                 controls(player).frame(height: 210)
-                #if os(iOS)
-                    Button(strings("Fullscreen")) { fullscreen = true }
-                        .fullScreenCover(isPresented: $fullscreen) {
-                            VStack {
-                                HStack {
-                                    Spacer()
-                                    Button(strings("Done")) { fullscreen = false }.padding()
-                                }
-                                controls(player)
-                            }.background(Color.black).foregroundStyle(.white)
-                        }
-                #endif
             } else {
                 ProgressView()
             }
-            if let caption = media.caption ?? media.alt { Text(caption).templateBody() }
+            if let caption = displayCaption ?? media.caption ?? media.alt { Text(caption).templateBody() }
         }.templateCard()
             .task(id: media.url) { model.load(media.url) }
-            .onDisappear { if !fullscreen { model.dispose() } }
+            .onAppear {
+                if presentation?.isVideoFullscreenPresented == true {
+                    presentation?.setVideoFullscreenPresented(false)
+                }
+            }
+            .onDisappear {
+                if presentation?.isVideoFullscreenPresented != true { model.dispose() }
+            }
             .onChange(of: scenePhase) { if $0 != .active { model.pause() } }
     }
     @ViewBuilder private func controls(_ player: AVPlayer) -> some View {
         #if os(iOS)
-            NativeVideoControls(player: player)
+            NativeVideoControls(player: player) { isPresented in
+                presentation?.setVideoFullscreenPresented(isPresented)
+            }
         #else
             VideoPlayer(player: player)
         #endif
@@ -173,7 +210,7 @@ struct InlineAudioPlayer: View {
             if model.failed {
                 Text(strings("Unable to play this media.")).font(.caption)
                 if ChatMediaPlayer.safeURL(media.url) != nil {
-                    Button(strings("Retry")) { model.load(media.url) }
+                    Button(strings("Retry")) { model.load(media.url, force: true) }
                 }
             } else {
                 HStack {

@@ -1136,6 +1136,7 @@ public enum AgentChatUI {
 @MainActor public final class ChatPresentationState {
     private var forms: [String: [String: String]] = [:]
     private var feedbackStates: [String: MessageFeedbackState] = [:]
+    private(set) var isVideoFullscreenPresented = false
     func feedback(for id: String) -> MessageFeedbackState {
         if let state = feedbackStates[id] { return state }
         let state = MessageFeedbackState()
@@ -1151,9 +1152,13 @@ public enum AgentChatUI {
         forms[id] = values
         if forms.count > 500, let first = forms.keys.first { forms.removeValue(forKey: first) }
     }
+    func setVideoFullscreenPresented(_ presented: Bool) {
+        isVideoFullscreenPresented = presented
+    }
     func clear() {
         forms.removeAll()
         feedbackStates.removeAll()
+        isVideoFullscreenPresented = false
     }
 }
 

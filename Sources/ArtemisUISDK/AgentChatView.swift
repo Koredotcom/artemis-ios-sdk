@@ -258,7 +258,11 @@ public struct AgentChatView: View {
             model.configureStrings(options.strings)
             model.start()
         }
-        .onDisappear { if handle?.isMinimized != true { model.stop() } }
+        .onDisappear {
+            if handle?.isMinimized != true, !model.presentation.isVideoFullscreenPresented {
+                model.stop()
+            }
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .active { model.refreshAfterForeground() }
         }
@@ -398,6 +402,7 @@ private struct EmptyState: View {
 
 struct MessageBubble: View {
     @Environment(\.chatStrings) private var strings
+    @Environment(\.layoutDirection) private var layoutDirection
     let message: Message
     let rowWidth: CGFloat
     let fonts: ChatFonts?
@@ -545,7 +550,12 @@ struct MessageBubble: View {
             isUser
                 ? Color(hexString: theme?.userBubbleColor) : Color(hexString: theme?.assistantBubbleColor)
         )
-        .clipShape(RoundedRectangle(cornerRadius: theme?.messageBubbleRadius ?? 16))
+        .clipShape(
+            ChatMessageBubbleShape(
+                radius: theme?.messageBubbleRadius ?? 16,
+                tailOnLeft: isUser
+                    ? layoutDirection == .rightToLeft
+                    : layoutDirection == .leftToRight))
         .clipped()
     }
     private var templateContext: RichTemplateContext {
@@ -615,6 +625,7 @@ private struct CarouselCard: View {
 
 struct TypingBubble: View {
     @Environment(\.chatStrings) private var strings
+    @Environment(\.layoutDirection) private var layoutDirection
     let theme: ChatTheme?
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
@@ -630,8 +641,46 @@ struct TypingBubble: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .background(Color(hexString: theme?.assistantBubbleColor))
-        .clipShape(RoundedRectangle(cornerRadius: theme?.messageBubbleRadius ?? 16))
+        .clipShape(
+            ChatMessageBubbleShape(
+                radius: theme?.messageBubbleRadius ?? 16,
+                tailOnLeft: layoutDirection == .leftToRight))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ChatMessageBubbleShape: Shape {
+    let radius: CGFloat
+    let tailOnLeft: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let cornerRadius = min(max(0, radius), min(rect.width, rect.height) / 2)
+        let tailRadius = min(cornerRadius, 5)
+        let topLeft = cornerRadius
+        let topRight = cornerRadius
+        let bottomLeft = tailOnLeft ? tailRadius : cornerRadius
+        let bottomRight = tailOnLeft ? cornerRadius : tailRadius
+
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + topLeft, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - topRight, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + topRight),
+            control: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + bottomLeft, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft),
+            control: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeft))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topLeft, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }
 

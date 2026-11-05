@@ -4,6 +4,9 @@ struct OutlinedPillButtonStyle: ButtonStyle {
     @Environment(\.chatTheme) private var theme
     let accentColor: Color
     var isSelected = false
+    var expandsToFullWidth = true
+    var horizontalPadding: CGFloat = 16
+    var minHeight: CGFloat = 42
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -11,9 +14,9 @@ struct OutlinedPillButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .foregroundStyle(accentColor)
-            .padding(.horizontal, 16)
-            .frame(minHeight: 42)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, horizontalPadding)
+            .frame(minHeight: minHeight)
+            .frame(maxWidth: expandsToFullWidth ? .infinity : nil)
             .background(
                 (isSelected ? accentColor.opacity(0.18) : Color.clear).opacity(
                     configuration.isPressed ? 0.8 : 1)
