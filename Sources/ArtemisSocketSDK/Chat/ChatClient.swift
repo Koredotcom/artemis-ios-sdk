@@ -682,11 +682,22 @@ extension ChatClientDelegate {
             return true
         }
         if !history.isEmpty && history.allSatisfy({ $0.sequence != nil }) {
-            messages =
-                history.sorted { $0.sequence! < $1.sequence! }
-                + locals.sorted { $0.timestamp < $1.timestamp }
+            let orderedHistory = history.enumerated().sorted { lhs, rhs in
+                if lhs.element.sequence == rhs.element.sequence { return lhs.offset < rhs.offset }
+                return lhs.element.sequence! < rhs.element.sequence!
+            }.map { $0.element }
+            var merged = orderedHistory
+            for local in locals {
+                let insertionIndex = merged.firstIndex { $0.timestamp > local.timestamp } ?? merged.endIndex
+                merged.insert(local, at: insertionIndex)
+            }
+            messages = merged
         } else {
-            messages = (history + locals).sorted { $0.timestamp < $1.timestamp }
+            let combined = history + locals
+            messages = combined.enumerated().sorted { lhs, rhs in
+                if lhs.element.timestamp == rhs.element.timestamp { return lhs.offset < rhs.offset }
+                return lhs.element.timestamp < rhs.element.timestamp
+            }.map { $0.element }
         }
         let selections = messages.compactMap {
             ($0.metadata?["custom"]?.value as? [String: Any])?["actionSubmit"] as? [String: Any]
