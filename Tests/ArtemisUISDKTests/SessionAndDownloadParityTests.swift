@@ -225,6 +225,26 @@ final class SessionAndDownloadParityTests: XCTestCase {
         XCTAssertThrowsError(
             try AttachmentHTTP.multipartFile(source: file, contentType: "text/plain", boundary: "test"))
     }
+    func testContactCenterDefaultsAndExplicitOptOut() throws {
+        XCTAssertTrue(FeaturesConfig().enableContactCenter)
+        XCTAssertFalse(FeaturesConfig(enableContactCenter: false).enableContactCenter)
+
+        let config = SDKConfiguration(
+            environment: "dev",
+            connection: ConnectionConfig(projectId: "p", endpoint: "https://fixture.invalid", apiKey: "fixture"))
+        XCTAssertTrue(config.features.enableContactCenter)
+
+        let yaml = """
+            artemis_sdk:
+              connection:
+                project_id: p
+                endpoint: https://fixture.invalid
+                api_key: fixture
+            """
+        XCTAssertTrue(try ArtemisSocketSDK.SDKConfigurationLoader.load(yaml: yaml).features.enableContactCenter)
+        XCTAssertFalse(try ArtemisSocketSDK.SDKConfigurationLoader.load(
+            yaml: yaml + "\n  features:\n    enable_contact_center: false\n").features.enableContactCenter)
+    }
     func testYAMLParsesAndroidParityFlagsAndKeepsLegacyDefaults() throws {
         let config = try ArtemisSocketSDK.SDKConfigurationLoader.load(
             yaml: """

@@ -15,13 +15,14 @@ struct ChatFooterView: View {
     let onSend: () -> Void
     let onAttach: () -> Void
     var showAttachment: Bool = false
+    var canAttach: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
             Color(hexString: theme?.borderColor ?? "#E2E8F0").frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
                 if showAttachment {
-                    control("paperclip", label: "Add attachment", enabled: enabled, action: onAttach)
+                    control("paperclip", label: "Add attachment", enabled: enabled && canAttach, action: onAttach)
                 }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
@@ -148,12 +149,12 @@ struct ChatFooterView: View {
             func textView(
                 _ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
             ) -> Bool {
-                guard parent.enabled else { return false }
                 if text == "\n" {
-                    parent.onSend()
+                    view.resignFirstResponder()
+                    if parent.enabled { parent.onSend() }
                     return false
                 }
-                return true
+                return parent.enabled
             }
         }
     }

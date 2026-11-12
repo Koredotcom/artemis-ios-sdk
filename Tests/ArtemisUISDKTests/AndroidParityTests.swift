@@ -200,6 +200,52 @@ import XCTest
         XCTAssertEqual(recorder.messages.filter { $0.content == "Agent text" }.count, 1)
         XCTAssertEqual(recorder.typing.last, false)
     }
+    func testAgentTypingSurvivesUserSendAndUnrelatedAssistantEvents() async throws {
+        let (client, session, recorder) = fixture(activity: true)
+        client.handleServerMessage(transferFrame("agent:connected"))
+        session.scope.showActivity = true
+        client.handleServerMessage(frame("status_update", ["text": "Assistant working"]))
+        XCTAssertEqual(recorder.activities.last!, "Assistant working")
+        client.handleServerMessage(transferFrame("agent:typing"))
+        client.handleServerMessage(transferFrame("agent:typing_stop"))
+        XCTAssertEqual(recorder.typing.last, false)
+        client.handleServerMessage(frame("status_update", ["text": "Assistant working"]))
+        session.onSend = { _ in client.handleServerMessage(self.transferFrame("agent:typing")) }
+        _ = try await client.send(text: "Reply to agent")
+        XCTAssertEqual(recorder.typing.last, true)
+        XCTAssertNil(recorder.activities.last!)
+
+        client.handleServerMessage(frame("status_update", ["text": "Late assistant status"]))
+        XCTAssertNil(recorder.activities.last!)
+        client.handleServerMessage(frame("status_clear"))
+        client.handleServerMessage(frame("response_start", ["messageId": "bot"]))
+        client.handleServerMessage(frame("response_chunk", ["messageId": "bot", "chunk": "Hello"]))
+        client.handleServerMessage(frame("response_end", ["messageId": "bot", "content": "Hello"]))
+        client.handleServerMessage(transferFrame("agent:connected"))
+        XCTAssertEqual(recorder.typing.last, true)
+
+        client.handleServerMessage(transferFrame("agent:typing_stop"))
+        XCTAssertEqual(recorder.typing.last, false)
+        client.handleServerMessage(transferFrame("agent:typing"))
+        client.handleServerMessage(transferFrame("agent:message", data: ["message": "Hello"]))
+        XCTAssertEqual(recorder.typing.last, false)
+        client.handleServerMessage(transferFrame("agent:typing"))
+        client.handleServerMessage(transferFrame("agent:disconnected"))
+        XCTAssertEqual(recorder.typing.last, false)
+    }
+    func testAgentTypingCanArriveBeforeSessionAndTransferConnection() {
+        let session = FixtureChatSession()
+        let client = ChatClient(sessionManager: session, config: configuration())
+        let recorder = ChatEventRecorder()
+        client.delegate = recorder
+        client.handleServerMessage(transferFrame("agent:typing"))
+        XCTAssertEqual(recorder.typing.last, true)
+        client.handleServerMessage(frame("session_start", ["sessionId": "conversation"]))
+        client.handleServerMessage(transferFrame("agent:connected"))
+        XCTAssertEqual(recorder.typing.last, true)
+        client.handleServerMessage(transferFrame("agent:typing_stop"))
+        XCTAssertEqual(recorder.typing.last, false)
+    }
     func testTransferFormsAndFailedAttachmentMetadata() throws {
         let event = try XCTUnwrap(
             AgentTransfer.parse(
@@ -274,7 +320,7 @@ import XCTest
         client.handleServerMessage(frame("thought", ["thought": "still hidden by default"]))
         XCTAssertTrue(client.getMessages().isEmpty)
     }
-    func testAttachmentAndContactFeaturesDefaultOffAndMIMELimitsAreBounded() {
+    func testAttachmentDefaultAndContactOptOutAndMIMELimitsAreBounded() {
         XCTAssertFalse(configuration().features.enableAttachments)
         XCTAssertFalse(configuration().features.enableContactCenter)
         let policy = AttachmentConfig(maxFileSizeBytes: 100, allowedMimeTypes: ["image/*", "text/plain"])

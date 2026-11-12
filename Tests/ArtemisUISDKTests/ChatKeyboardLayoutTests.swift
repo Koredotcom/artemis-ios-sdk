@@ -6,6 +6,103 @@
     @testable import ArtemisUISDK
 
     final class ChatKeyboardLayoutTests: XCTestCase {
+        @MainActor func testSendingKeepsComposerFocusedWhileRequestIsPending() async throws {
+            let state = KeyboardFixtureState()
+            let controller = UIHostingController(rootView: KeyboardNavigationFixture(state: state))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            state.text = "Hello"
+            try await settle()
+            let composer = try XCTUnwrap(find(UITextView.self, in: controller.view))
+            XCTAssertTrue(composer.becomeFirstResponder())
+
+            // The send button invokes the same action without resigning focus.
+            state.send()
+            try await settle()
+            XCTAssertEqual(state.sentCount, 1)
+            XCTAssertTrue(state.isSending)
+            XCTAssertTrue(composer.isEditable)
+            XCTAssertTrue(composer.isFirstResponder)
+
+            composer.insertText(" next draft")
+            try await settle()
+            XCTAssertTrue(state.text.contains("next draft"))
+            state.isSending = false
+            try await settle()
+            XCTAssertTrue(composer.isFirstResponder)
+        }
+
+        @MainActor func testKeyboardSendKeyDismissesAndSends() async throws {
+            let state = KeyboardFixtureState()
+            let controller = UIHostingController(rootView: KeyboardNavigationFixture(state: state))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            state.text = "Hello"
+            try await settle()
+            let composer = try XCTUnwrap(find(UITextView.self, in: controller.view))
+            XCTAssertTrue(composer.becomeFirstResponder())
+            let range = NSRange(location: (composer.text as NSString).length, length: 0)
+            XCTAssertEqual(composer.delegate?.textView?(composer, shouldChangeTextIn: range, replacementText: "\n"), false)
+            try await settle()
+            XCTAssertEqual(state.sentCount, 1)
+            XCTAssertTrue(state.isSending)
+            XCTAssertFalse(composer.isFirstResponder)
+        }
+
+        @MainActor func testKeyboardSendKeyDismissesWithEmptyOrPendingDraft() async throws {
+            let state = KeyboardFixtureState()
+            let controller = UIHostingController(rootView: KeyboardNavigationFixture(state: state))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            try await settle()
+            let composer = try XCTUnwrap(find(UITextView.self, in: controller.view))
+            for pending in [false, true] {
+                state.text = pending ? "Draft" : ""
+                state.isSending = pending
+                try await settle()
+                XCTAssertTrue(composer.becomeFirstResponder())
+                let range = NSRange(location: (composer.text as NSString).length, length: 0)
+                XCTAssertEqual(composer.delegate?.textView?(composer, shouldChangeTextIn: range, replacementText: "\n"), false)
+                try await settle()
+                XCTAssertFalse(composer.isFirstResponder)
+                XCTAssertEqual(state.sentCount, 0)
+                XCTAssertEqual(state.text, pending ? "Draft" : "")
+            }
+        }
+
+        @MainActor func testIncomingCallDismissesFocusedInputsWithoutClearingDraft() async throws {
+            let state = KeyboardFixtureState()
+            let controller = UIHostingController(rootView: KeyboardNavigationFixture(state: state))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer {
+                window.endEditing(true)
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+            try await settle()
+            let composer = try XCTUnwrap(find(UITextView.self, in: controller.view))
+            let field = try await waitForField(in: controller.view)
+            state.text = "Draft preserved"
+            try await settle()
+            for input in [composer as UIView, field as UIView] {
+                XCTAssertTrue(input.becomeFirstResponder())
+                state.showIncomingCall = true
+                try await settle()
+                XCTAssertFalse(input.isFirstResponder)
+                XCTAssertEqual(state.text, "Draft preserved")
+                state.showIncomingCall = false
+                try await settle()
+            }
+        }
+
         @MainActor func testKeyboardFocusMovesBetweenFormAndGrowingComposer() async throws {
             let state = KeyboardFixtureState()
             let controller = UIHostingController(rootView: KeyboardNavigationFixture(state: state))
@@ -174,7 +271,16 @@
         @Published var text = ""
         @Published var width: CGFloat = 390
         @Published var enabled = true
+        @Published var isSending = false
+        var sentCount = 0
         @Published var showRichResponse = false
+        @Published var showIncomingCall = false
+
+        func send() {
+            guard enabled, !isSending, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            sentCount += 1
+            isSending = true
+        }
     }
     private struct KeyboardNavigationFixture: View {
         @ObservedObject var state: KeyboardFixtureState
@@ -240,9 +346,16 @@
                     }
                 }
                 ChatFooterView(
-                    text: $state.text, enabled: state.enabled, canSend: state.enabled && !state.text.isEmpty, placeholder: "Message", font: nil,
-                    theme: nil, onSend: {}, onAttach: {}, showAttachment: true)
-            }.frame(width: state.width)
+                    text: $state.text, enabled: state.enabled,
+                    canSend: state.enabled && !state.isSending && !state.text.isEmpty,
+                    placeholder: "Message", font: nil, theme: nil,
+                    onSend: state.send,
+                    onAttach: {}, showAttachment: true, canAttach: !state.isSending)
+            }
+            .frame(width: state.width)
+            .overlay {
+                if state.showIncomingCall { IncomingCallKeyboardDismissal().allowsHitTesting(false) }
+            }
         }
     }
 #endif

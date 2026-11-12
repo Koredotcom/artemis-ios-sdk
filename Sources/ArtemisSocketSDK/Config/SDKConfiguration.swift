@@ -413,7 +413,7 @@ public struct FeaturesConfig: Sendable {
         enableFeedback: Bool = true,
         enableActivityUpdates: Bool = false,
         enableAttachments: Bool = false,
-        enableContactCenter: Bool = false,
+        enableContactCenter: Bool = true,
         enableHistory: Bool = true,
         enableCitations: Bool = true
     ) {
@@ -641,7 +641,7 @@ enum SDKConfigurationParser {
                 enableFeedback: featuresMap["enable_feedback"] as? Bool ?? true,
                 enableActivityUpdates: featuresMap["enable_activity_updates"] as? Bool ?? false,
                 enableAttachments: featuresMap["enable_attachments"] as? Bool ?? false,
-                enableContactCenter: featuresMap["enable_contact_center"] as? Bool ?? false,
+                enableContactCenter: featuresMap["enable_contact_center"] as? Bool ?? true,
                 enableHistory: featuresMap["enable_history"] as? Bool ?? true,
                 enableCitations: featuresMap["enable_citations"] as? Bool ?? true
             ),

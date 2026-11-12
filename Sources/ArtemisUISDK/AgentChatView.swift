@@ -185,6 +185,7 @@ public struct AgentChatView: View {
             #if os(iOS)
                 if model.shouldShowContactCenterCall {
                     ContactCenterCallPanel(model: model)
+                        .background { IncomingCallKeyboardDismissal() }
                         .transition(.opacity)
                         .zIndex(1)
                 }
@@ -309,19 +310,19 @@ public struct AgentChatView: View {
             footerBuilder(
                 ChatFooterContext(
                     text: $model.composeText,
-                    enabled: model.status == .connected && model.isInternetAvailable && !model.isSending,
+                    enabled: model.status == .connected && model.isInternetAvailable,
                     placeholder: model.placeholder, theme: model.theme, onSend: model.sendComposedText,
-                    onAttach: model.attachmentsAllowed ? { showAttachmentOptions = true } : nil,
+                    onAttach: model.attachmentsAllowed && !model.isSending ? { showAttachmentOptions = true } : nil,
                     canSend: model.canSend,
                     isUploading: model.isUploadingAttachment, pendingAttachments: model.pendingAttachments))
         } else {
             ChatFooterView(
                 text: $model.composeText,
-                enabled: model.status == .connected && model.isInternetAvailable && !model.isSending,
+                enabled: model.status == .connected && model.isInternetAvailable,
                 canSend: model.canSend, placeholder: model.placeholder, font: fonts?.family,
                 theme: model.theme,
                 onSend: model.sendComposedText, onAttach: { showAttachmentOptions = true },
-                showAttachment: model.attachmentsAllowed)
+                showAttachment: model.attachmentsAllowed, canAttach: !model.isSending)
         }
     }
     @ViewBuilder private var attachmentTray: some View {
@@ -347,6 +348,26 @@ public struct AgentChatView: View {
         }
     }
 }
+
+#if os(iOS)
+    /// Resign the focused composer or form field in this chat's window when a call appears.
+    struct IncomingCallKeyboardDismissal: UIViewRepresentable {
+        func makeUIView(context: Context) -> KeyboardDismissalView { KeyboardDismissalView() }
+        func updateUIView(_ view: KeyboardDismissalView, context: Context) {}
+
+        final class KeyboardDismissalView: UIView {
+            override func didMoveToWindow() {
+                super.didMoveToWindow()
+                guard let window else { return }
+                // Resigning synchronously can reenter SwiftUI while it is updating the view hierarchy.
+                DispatchQueue.main.async { [weak self, weak window] in
+                    guard let self, let window, self.window === window else { return }
+                    window.endEditing(true)
+                }
+            }
+        }
+    }
+#endif
 
 private struct StatusBar: View {
     @Environment(\.chatStrings) private var strings

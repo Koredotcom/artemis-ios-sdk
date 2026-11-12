@@ -891,7 +891,8 @@ public enum AgentChatUI {
     }
     public func sendComposedText() {
         guard canSend, let sdk else { return }
-        let text = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentDraft = composeText
+        let text = sentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = pendingAttachments
         guard attachments.isEmpty || attachmentSessionId == sdk.getSessionId() else {
             resetAttachments()
@@ -919,10 +920,14 @@ public enum AgentChatUI {
                 )
                 guard self.sdk === sdk else { return }
                 self.sentAttachments[id] = attachments
-                self.composeText = ""
+                if self.composeText == sentDraft {
+                    self.composeText = ""
+                }
                 self.resetAttachments()
                 self.messages = sdk.getMessages()
-                try? sdk.sendUserPresence(isTyping: false)
+                if self.composeText.isEmpty {
+                    try? sdk.sendUserPresence(isTyping: false)
+                }
             } catch { self.errorMessage = strings(error.localizedDescription) }
         }
     }
@@ -1116,17 +1121,13 @@ public enum AgentChatUI {
         case .agentTransferChanged(let state): transferStatus = state
         case .messageChunk:
             scrollToBottomRequest &+= 1
-            isTyping = false
         case .messageEnd:
             // Final metadata can add a tall form/table after the last text chunk.
             scrollToBottomRequest &+= 1
-            isTyping = false
             activityText = nil
         case .responseCancelled:
-            isTyping = false
             activityText = nil
         case .error(let error):
-            isTyping = false
             errorMessage = strings(error.localizedDescription)
         default: break
         }

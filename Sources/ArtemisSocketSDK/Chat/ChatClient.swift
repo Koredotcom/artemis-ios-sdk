@@ -34,6 +34,9 @@ extension ChatClientDelegate {
     private var lastTransferTransition = Date.distantPast
     private var transferRevision = 0
     private var activityText: String?
+    private var assistantIsTyping = false
+    private var agentIsTyping = false
+    private var agentTypingSessionId: String?
     private var pendingActionRenders = Set<String>()
     weak var delegate: ChatClientDelegate?
 
@@ -241,6 +244,7 @@ extension ChatClientDelegate {
             finishAck(key: key, survey: true, result: .failure(ChatClientError.notConnected))
         }
         setTyping(false)
+        setAgentTyping(false)
         activityText = nil
         emit(.activity(text: nil))
     }
@@ -300,6 +304,7 @@ extension ChatClientDelegate {
             let item = old.replacing(content: old.content + chunk, status: .streaming)
             upsert(item)
             emit(.messageReceived(item))
+            setTyping(false)
             emit(.messageChunk(messageId: id, chunk: chunk))
         case "response_end":
             let responseID = id ?? UUID().uuidString
@@ -425,11 +430,18 @@ extension ChatClientDelegate {
     private func handleTransfer(_ raw: [String: Any]) {
         // Human-agent replies are part of the active transcript, as in the WebSDK.
         // Optional contact-center UI configuration must not discard delivered messages.
-        guard currentSessionId != nil,
-            let event = AgentTransfer.parse(raw)
-        else {
+        guard let event = AgentTransfer.parse(raw) else { return }
+        // Typing can arrive before transfer state has been restored or connected.
+        if event.type == "agent:typing" || event.type == "agent:typing_stop" {
+            if event.type == "agent:typing" {
+                activityText = nil
+                emit(.activity(text: nil))
+            }
+            setAgentTyping(event.type == "agent:typing", sessionId: event.sessionId)
+            if event.type == "agent:typing" { setTyping(false) }
             return
         }
+        guard currentSessionId != nil else { return }
         let transitions = [
             "agent:queued", "agent:waiting_message", "agent:connected", "agent:disconnected",
         ]
@@ -474,13 +486,15 @@ extension ChatClientDelegate {
             activeRequest = nil
             setTransfer(next)
             setTyping(false)
+            if next != .connected || (agentTypingSessionId != nil && agentTypingSessionId != event.sessionId) {
+                setAgentTyping(false)
+            }
             emit(.activity(text: nil))
         }
-        if ["agent:typing", "agent:typing_stop", "agent:message"].contains(event.type),
-            transferSessionId == nil || transferSessionId == event.sessionId,
-            transferStatus != .disconnected
+        if ["agent:message", "agent:form", "agent.attachment"].contains(event.type),
+            agentTypingSessionId == event.sessionId
         {
-            setTyping(event.type == "agent:typing")
+            setAgentTyping(false)
         }
         emit(.historyLoaded(messages: messages))
     }
@@ -495,6 +509,8 @@ extension ChatClientDelegate {
             setTyping(false)
             return
         }
+        // A delayed assistant status must not replace the human-agent typing bubble.
+        if type == "status_update", agentIsTyping { return }
         guard config.features.enableActivityUpdates, let scope = sessionManager.getScope(),
             scope.showActivityUpdates
         else { return }
@@ -548,7 +564,18 @@ extension ChatClientDelegate {
         }
     }
     private func setTyping(_ value: Bool) {
-        if config.chat.enableTypingIndicator { emit(.typingIndicator(isTyping: value)) }
+        assistantIsTyping = value
+        emitTyping()
+    }
+    private func setAgentTyping(_ value: Bool, sessionId: String? = nil) {
+        agentIsTyping = value
+        agentTypingSessionId = value ? sessionId : nil
+        emitTyping()
+    }
+    private func emitTyping() {
+        if config.chat.enableTypingIndicator {
+            emit(.typingIndicator(isTyping: assistantIsTyping || agentIsTyping))
+        }
     }
     private func upsert(_ item: Message) {
         if let i = messages.firstIndex(where: { $0.id == item.id }) {

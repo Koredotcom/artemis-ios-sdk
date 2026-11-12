@@ -214,8 +214,8 @@ five-file draft strip, file-type icons and expandable sent-file groups. Reading
 older messages pauses automatic following; sending or tapping Latest resumes it.
 
 Runtime controls attachment availability. Incoming human-agent text, typing, and
-transfer status are handled automatically, matching the WebSDK. Enable optional
-contact-center form links and surveys with `enableContactCenter`:
+transfer status are handled automatically, matching the WebSDK. Contact-center
+form links and surveys are enabled by default:
 
 ```swift
 let configuration = SDKConfiguration(
@@ -226,7 +226,6 @@ let configuration = SDKConfiguration(
         apiKey: "pk_your_public_key"
     ),
     channel: ChannelConfig(channelName: "mobile"),
-    features: FeaturesConfig(enableContactCenter: true),
     attachments: AttachmentConfig(maxFileSizeBytes: 20 * 1024 * 1024)
 )
 ```
@@ -247,8 +246,10 @@ server-local storage URL uses the authenticated delivery-URL route instead.
 
 ### Agent audio and video calls
 
-Set `FeaturesConfig(enableContactCenter: true)` to show incoming agent call
-controls. Runtime must also enable Contact Center and provide the session call
+Incoming agent call controls are enabled by default. Set
+`FeaturesConfig(enableContactCenter: false)` to disable Contact Center features.
+For YAML configuration, set `features.enable_contact_center: false` to opt out.
+Runtime must also enable Contact Center and provide the session call
 capabilities. The native chat supports accepting or declining calls, audio and
 video, mute, camera toggle, and hangup. The call uses the same AudioCodes WebRTC
 stack and SIP signaling values as the Web SDK.
@@ -303,7 +304,6 @@ Equivalent YAML additions live under the existing `artemis_sdk` root:
 
 ```yaml
 features:
-  enable_contact_center: true
   enable_history: true
   enable_citations: true
 attachments:
