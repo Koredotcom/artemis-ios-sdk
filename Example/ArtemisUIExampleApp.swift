@@ -21,7 +21,12 @@ struct ContentView: View {
         NavigationView {
             VStack(spacing: 20) {
                 Button("Open Agent Chat") {
-                    let handle = chatHandle ?? AgentChatUI.initialize(configuration: configuration)
+                    let handle = chatHandle ?? AgentChatUI.initialize(
+                        configuration: configuration,
+                        onEvent: { event in
+                            print(event.eventCode, event.eventMessage, event.eventReason)
+                        }
+                    )
                     chatHandle = handle
                     presentedChat = ChatPresentation(handle: handle)
                 }.buttonStyle(.borderedProminent)

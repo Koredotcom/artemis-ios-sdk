@@ -51,16 +51,16 @@ public struct AgentChatView: View {
         environment: String? = nil, configResource: String = "sdk_configurations",
         runtimeUserContext: SDKUserContext? = nil, headerBuilder: ChatHeaderBuilder? = nil,
         footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
-        uiOptions: ChatUIOptions? = nil,
+        uiOptions: ChatUIOptions? = nil, onEvent: AgentChatEventHandler? = nil,
         onClose: (() -> Void)? = nil
     ) {
-        _model = StateObject(
-            wrappedValue: AgentChatViewModel(
-                configuration: configuration, environment: environment, configResource: configResource,
-                runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
-                footerBuilder: footerBuilder,
-                templateRegistry: templateRegistry,
-                appearance: uiOptions?.appearance ?? .light))
+        let model = AgentChatViewModel(
+            configuration: configuration, environment: environment, configResource: configResource,
+            runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
+            footerBuilder: footerBuilder, templateRegistry: templateRegistry,
+            appearance: uiOptions?.appearance ?? .light)
+        model.eventHandler = onEvent
+        _model = StateObject(wrappedValue: model)
         self.title = title
         self.fonts = fonts
         self.headerBuilder = headerBuilder
@@ -294,6 +294,9 @@ public struct AgentChatView: View {
     }
     private var closeChat: () -> Void {
         {
+            model.emitHostEvent(
+                AgentChatEvent(
+                    eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
             handle?.close()
             model.stop()
             (onClose ?? { dismiss() })()
@@ -301,6 +304,10 @@ public struct AgentChatView: View {
     }
     private var minimizeChat: () -> Void {
         {
+            guard handle != nil else { return }
+            model.emitHostEvent(
+                AgentChatEvent(
+                    eventCode: "BotMinimized", eventMessage: "Bot minimized by the user", eventReason: 4))
             handle?.minimize()
             (onClose ?? { dismiss() })()
         }

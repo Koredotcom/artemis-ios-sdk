@@ -18,6 +18,30 @@ import SwiftUI
     import UIKit
 #endif
 
+/// A lifecycle event reported by the chat UI SDK to the hosting application.
+///
+/// The coding keys match the event payload format used by host integrations.
+public struct AgentChatEvent: Codable, Equatable, Sendable {
+    public let eventCode: String
+    public let eventMessage: String
+    public let eventReason: Int
+
+    public init(eventCode: String, eventMessage: String, eventReason: Int) {
+        self.eventCode = eventCode
+        self.eventMessage = eventMessage
+        self.eventReason = eventReason
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventCode = "event_code"
+        case eventMessage = "event_message"
+        case eventReason = "event_reason"
+    }
+}
+
+/// Receives chat lifecycle events on the main actor.
+public typealias AgentChatEventHandler = (AgentChatEvent) -> Void
+
 public struct ChatHeaderContext {
     public let title: String
     public let theme: ChatTheme?
@@ -303,7 +327,7 @@ public enum AgentChatUI {
         environment: String? = nil, configResource: String = "sdk_configurations",
         runtimeUserContext: SDKUserContext? = nil, headerBuilder: ChatHeaderBuilder? = nil,
         footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
-        uiOptions: ChatUIOptions? = nil,
+        uiOptions: ChatUIOptions? = nil, onEvent: AgentChatEventHandler? = nil,
         onClose: (() -> Void)? = nil
     ) -> AgentChatView {
         AgentChatView(
@@ -311,7 +335,7 @@ public enum AgentChatUI {
             configResource: configResource, runtimeUserContext: runtimeUserContext,
             headerBuilder: headerBuilder,
             footerBuilder: footerBuilder, templateRegistry: templateRegistry, uiOptions: uiOptions,
-            onClose: onClose)
+            onEvent: onEvent, onClose: onClose)
     }
 
     #if canImport(UIKit)
@@ -324,7 +348,8 @@ public enum AgentChatUI {
             configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
             templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
-            hidesBottomBarWhenPushed: Bool = true, animated: Bool = true
+            hidesBottomBarWhenPushed: Bool = true, animated: Bool = true,
+            onEvent: AgentChatEventHandler? = nil
         ) -> Bool {
             guard
                 let navigationController = (controller as? UINavigationController)
@@ -337,7 +362,7 @@ public enum AgentChatUI {
                 configuration: configuration, title: title, fonts: fonts, environment: environment,
                 configResource: configResource, runtimeUserContext: runtimeUserContext,
                 headerBuilder: headerBuilder, footerBuilder: footerBuilder,
-                templateRegistry: templateRegistry, uiOptions: uiOptions
+                templateRegistry: templateRegistry, uiOptions: uiOptions, onEvent: onEvent
             ) { [weak navigationController, weak source] in
                 guard let navigationController, let source,
                     navigationController.topViewController is ChatNavigationHostingController<AgentChatView>,
@@ -357,13 +382,15 @@ public enum AgentChatUI {
             title: String = "Chat", fonts: ChatFonts? = nil, environment: String? = nil,
             configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
-            templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil
+            templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
+            onEvent: AgentChatEventHandler? = nil
         ) {
             let chat = view(
                 configuration: configuration, title: title, fonts: fonts, environment: environment,
                 configResource: configResource, runtimeUserContext: runtimeUserContext,
                 headerBuilder: headerBuilder,
-                footerBuilder: footerBuilder, templateRegistry: templateRegistry, uiOptions: uiOptions
+                footerBuilder: footerBuilder, templateRegistry: templateRegistry, uiOptions: uiOptions,
+                onEvent: onEvent
             ) { [weak controller] in
                 controller?.dismiss(animated: true)
             }
@@ -449,6 +476,8 @@ public enum AgentChatUI {
     @Published public internal(set) var isSending = false
     @Published public internal(set) var attachmentsAllowed = false
     @Published var sentAttachments: [String: [ChatAttachment]] = [:]
+    var eventHandler: AgentChatEventHandler?
+    private var hasActiveConnection = false
     public private(set) var sdk: AgentSDK?
     public let presentation = ChatPresentationState()
     var attachmentSessionId: String?
@@ -1079,9 +1108,13 @@ public enum AgentChatUI {
             systemDarkMode: systemDarkMode, appearance: appearance)
         updateAttachmentPolicy(sdk.getSessionScope())
     }
+    func emitHostEvent(_ event: AgentChatEvent) {
+        eventHandler?(event)
+    }
     private func handle(_ event: SDKEvent) {
         switch event {
         case .connected(let id):
+            hasActiveConnection = true
             if let previous = attachmentSessionId, previous != id {
                 resetAttachments()
                 surveys.removeAll()
@@ -1093,11 +1126,18 @@ public enum AgentChatUI {
             status = .connected
             errorMessage = nil
             updatePolicy()
+            emitHostEvent(
+                AgentChatEvent(
+                    eventCode: "BotConnectionStatus",
+                    eventMessage: "Bot connected successfully",
+                    eventReason: 1))
         case .sessionScopeChanged: updatePolicy()
         case .reconnecting:
             status = .connecting
             cancelAllUploads()
         case .disconnected:
+            let wasConnected = hasActiveConnection
+            hasActiveConnection = false
             status = .notConnected
             isTyping = false
             cancelAllUploads()
@@ -1107,6 +1147,13 @@ public enum AgentChatUI {
                 contactCenterSbcRequestId = nil
                 resetContactCenterCall(status: .idle)
             #endif
+            if wasConnected {
+                emitHostEvent(
+                    AgentChatEvent(
+                        eventCode: "BotConnectionStatus",
+                        eventMessage: "Bot disconnected successfully",
+                        eventReason: 2))
+            }
         case .error(let error, let code):
             if code != .historyFetch { errorMessage = strings(error.localizedDescription) }
             if sdk?.isConnected() != true { status = .notConnected }

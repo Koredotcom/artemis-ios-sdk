@@ -8,13 +8,19 @@ import SwiftUI
 @MainActor public final class AgentChatHandle: ObservableObject {
     let model: AgentChatViewModel
     @Published public private(set) var isMinimized = false
+    /// Receives connection and user-action events from this chat instance.
+    public var onEvent: AgentChatEventHandler?
+
     public init(
         configuration: SDKConfiguration? = nil, environment: String? = nil,
-        configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil
+        configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
+        onEvent: AgentChatEventHandler? = nil
     ) {
         model = AgentChatViewModel(
             configuration: configuration, environment: environment, configResource: configResource,
             runtimeUserContext: runtimeUserContext)
+        self.onEvent = onEvent
+        model.eventHandler = { [weak self] event in self?.onEvent?(event) }
     }
     func minimize() { isMinimized = true }
     func reopen() { isMinimized = false }
@@ -31,10 +37,11 @@ import SwiftUI
 extension AgentChatUI {
     @MainActor public static func initialize(
         configuration: SDKConfiguration? = nil, environment: String? = nil,
-        runtimeUserContext: SDKUserContext? = nil
+        runtimeUserContext: SDKUserContext? = nil, onEvent: AgentChatEventHandler? = nil
     ) -> AgentChatHandle {
         AgentChatHandle(
-            configuration: configuration, environment: environment, runtimeUserContext: runtimeUserContext
+            configuration: configuration, environment: environment, runtimeUserContext: runtimeUserContext,
+            onEvent: onEvent
         )
     }
     @MainActor public static func view(

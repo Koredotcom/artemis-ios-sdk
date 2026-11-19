@@ -70,6 +70,26 @@ AgentChatUI.show(in: self, handle: chatHandle, title: "Support")
 // SwiftUI: AgentChatUI.view(handle: chatHandle, title: "Support")
 ```
 
+Register `onEvent` when creating a handle, or assign `chatHandle.onEvent` before
+opening chat. The callback receives `AgentChatEvent` on the main thread. Its
+`eventCode`, `eventMessage`, and `eventReason` properties encode as
+`event_code`, `event_message`, and `event_reason`:
+
+```swift
+private lazy var chatHandle = AgentChatUI.initialize(
+    configuration: configuration,
+    onEvent: { event in
+        print(event.eventCode, event.eventMessage, event.eventReason)
+    }
+)
+```
+
+The SDK reports `BotConnectionStatus` with reason `1` when connected and reason
+`2` after a connected session disconnects, `BotClosed` with reason `3` when the
+user taps Close, and `BotMinimized` with reason `4` when the user taps Minimize.
+The same `onEvent` callback is available on the configuration-based
+`AgentChatUI.view`, `show`, and `present` APIs.
+
 Call `chatHandle.close()` when the host no longer needs a minimized conversation.
 `chatHandle.endSession()` explicitly ends the Runtime session. Set
 `SessionConfig(endSessionOnClose: true)` to end it whenever chat closes.
