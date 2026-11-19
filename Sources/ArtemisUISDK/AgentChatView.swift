@@ -455,6 +455,14 @@ struct MessageBubble: View {
     var timestampSettings: MessageTimestampSettings? = nil
     var submitMessageFeedback: ((Int, String?) async throws -> Void)? = nil
     var isUser: Bool { message.role == .user }
+    private var hasBotResponseTemplate: Bool {
+        message.role == .assistant
+            && (message.richContent != nil || separatesActions
+                || templateRegistry?.renderers(for: message).isEmpty == false)
+    }
+    private var botResponseTemplateWidth: CGFloat {
+        max(1, rowWidth - 32 * (theme?.spacingScale ?? 1))
+    }
     private var separatesActions: Bool {
         message.role == .assistant && message.actions != nil
             && templateRegistry?.registeredTypes.contains(RichTemplateTypes.actions) != true
@@ -477,7 +485,9 @@ struct MessageBubble: View {
                 ZStack(alignment: isUser ? .trailing : .leading) {
                     bubble
                         .frame(
-                            maxWidth: max(1, rowWidth - (isUser ? 0 : 40)), alignment: isUser ? .trailing : .leading
+                            maxWidth: max(
+                                1, rowWidth - (isUser || hasBotResponseTemplate ? 0 : 40)),
+                            alignment: isUser ? .trailing : .leading
                         )
                         .simultaneousGesture(TapGesture().onEnded { timestampInteracting.toggle() })
                 }
@@ -485,7 +495,9 @@ struct MessageBubble: View {
             }
             if separatesActions, let actions = message.actions {
                 ActionsRichTemplate(actions: actions, context: templateContext)
-                    .frame(width: max(1, rowWidth - 40), alignment: .leading)
+                    .frame(
+                        width: hasBotResponseTemplate ? rowWidth : max(1, rowWidth - 40),
+                        alignment: .leading)
                     .padding(.top, hasBubbleContent ? 4 : 0)
                     .simultaneousGesture(TapGesture().onEnded { timestampInteracting.toggle() })
             }
@@ -563,9 +575,11 @@ struct MessageBubble: View {
                 message: message, context: templateContext,
                 suppressedTypes: suppressedTemplateTypes,
                 fillsAvailableWidth: !isUser && !separatesActions)
+                .frame(width: hasBotResponseTemplate ? botResponseTemplateWidth : nil, alignment: .leading)
             ForEach(Array((templateRegistry?.renderers(for: message) ?? []).enumerated()), id: \.offset) {
                 _, renderer in
                 renderer.build(message, templateContext)
+                    .frame(width: hasBotResponseTemplate ? botResponseTemplateWidth : nil, alignment: .leading)
             }
         }
         .padding(.horizontal, 16 * (theme?.spacingScale ?? 1))
