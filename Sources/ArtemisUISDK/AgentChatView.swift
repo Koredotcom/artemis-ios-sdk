@@ -543,6 +543,7 @@ struct MessageBubble: View {
             }
             if !attachments.isEmpty {
                 AttachmentMessageGroup(attachments: attachments, isUser: isUser, resolve: resolveAttachment)
+                    .frame(width: isUser ? max(1, rowWidth * 0.7) : nil, alignment: .leading)
             }
             if showAgentLinks, let url = message.agentLink {
                 Link(message.agentLinkTitle, destination: url).font(.subheadline.weight(.semibold))
