@@ -10,7 +10,7 @@ enum TransportClientMessage {
         metadata: [String: Any]?,
         customData: [String: Any]?
     )
-    case endSession(sessionId: String?)
+    case endSession
     case actionSubmit(
         actionId: String,
         value: String?,
@@ -50,10 +50,8 @@ enum TransportClientMessage {
             if let customData, !customData.isEmpty { dict["customData"] = customData }
             return dict
 
-        case .endSession(let sessionId):
-            var dict: [String: Any] = ["type": "end_session"]
-            if let sessionId { dict["sessionId"] = sessionId }
-            return dict
+        case .endSession:
+            return ["type": "end_session"]
 
         case .actionSubmit(let actionId, let value, let formData, let renderId):
             var dict: [String: Any] = ["type": "action_submit", "actionId": actionId]

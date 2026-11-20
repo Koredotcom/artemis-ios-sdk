@@ -105,7 +105,7 @@ import Foundation
             return
         }
         // The frame is enqueued before marking the session as ending.
-        try? send(.endSession(sessionId: sessionId))
+        try? send(.endSession)
         ending = true
         endTask?.cancel()
         endTask = Task { [weak self] in

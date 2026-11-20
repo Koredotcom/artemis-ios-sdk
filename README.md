@@ -90,9 +90,11 @@ user taps Close, and `BotMinimized` with reason `4` when the user taps Minimize.
 The same `onEvent` callback is available on the configuration-based
 `AgentChatUI.view`, `show`, and `present` APIs.
 
-Call `chatHandle.close()` when the host no longer needs a minimized conversation.
-`chatHandle.endSession()` explicitly ends the Runtime session. Set
-`SessionConfig(endSessionOnClose: true)` to end it whenever chat closes.
+The header's Close button sends `{"type":"end_session"}` before the chat view
+closes. `chatHandle.endSession()` does the same from host code. Use
+`chatHandle.close()` to release a minimized conversation without explicitly
+ending its Runtime session; set `SessionConfig(endSessionOnClose: true)` if
+host-driven `close()` should also end the Runtime session.
 
 For a SwiftUI host:
 

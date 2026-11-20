@@ -297,8 +297,11 @@ public struct AgentChatView: View {
             model.emitHostEvent(
                 AgentChatEvent(
                     eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
-            handle?.close()
-            model.stop()
+            if let handle = handle {
+                handle.endSession()
+            } else {
+                model.stop(endingSession: true)
+            }
             (onClose ?? { dismiss() })()
         }
     }
