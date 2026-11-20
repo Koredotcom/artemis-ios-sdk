@@ -234,15 +234,18 @@ private struct LegacyTemplateFlowRow<Item: Identifiable, Content: View>: View {
 private struct TemplateCardModifier: ViewModifier {
     @Environment(\.chatTheme) private var theme
     let padding: CGFloat
+    let backgroundColor: Color?
+    let borderColor: Color?
+    let cornerRadius: CGFloat?
     func body(content: Content) -> some View {
         content.padding(padding * (theme?.spacingScale ?? 1)).frame(
             maxWidth: .infinity, alignment: .leading
         )
-        .background(Color(hexString: theme?.surfaceColor ?? "#FFFFFF"))
-        .clipShape(RoundedRectangle(cornerRadius: theme?.borderRadius ?? 18))
+        .background(backgroundColor ?? Color(hexString: theme?.surfaceColor ?? "#FFFFFF"))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius ?? theme?.borderRadius ?? 18))
         .overlay(
-            RoundedRectangle(cornerRadius: theme?.borderRadius ?? 18).stroke(
-                Color(hexString: theme?.borderColor ?? "#E2E8F0"), lineWidth: 1))
+            RoundedRectangle(cornerRadius: cornerRadius ?? theme?.borderRadius ?? 18).stroke(
+                borderColor ?? Color(hexString: theme?.borderColor ?? "#E2E8F0"), lineWidth: 1))
     }
 }
 private struct TemplateTextModifier: ViewModifier {
@@ -258,8 +261,14 @@ private struct TemplateTextModifier: ViewModifier {
     }
 }
 extension View {
-    func templateCard(padding: CGFloat = 14) -> some View {
-        modifier(TemplateCardModifier(padding: padding))
+    func templateCard(
+        padding: CGFloat = 14, backgroundColor: Color? = nil, borderColor: Color? = nil,
+        cornerRadius: CGFloat? = nil
+    ) -> some View {
+        modifier(
+            TemplateCardModifier(
+                padding: padding, backgroundColor: backgroundColor, borderColor: borderColor,
+                cornerRadius: cornerRadius))
     }
     func templateTitle() -> some View {
         modifier(TemplateTextModifier(size: 17, weight: .bold, muted: false))
