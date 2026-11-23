@@ -233,134 +233,6 @@ Host apps can still pass a `RichTemplateRegistry` for custom payloads. Register
 a renderer with the same type as a built-in, for example `RichTemplateTypes.kpi`,
 to suppress the default renderer and provide an app-specific one.
 
-## Android commit parity
-
-This implementation follows Android commit
-[`b63db190f4c837a5e88cc481bb7f8709ef96769f`](https://github.com/Koredotcom/artemis-android-sdk/commit/b63db190f4c837a5e88cc481bb7f8709ef96769f).
-It includes the title/status header, retained-handle minimize/reopen lifecycle,
-40-point attachment/send controls, a separate rounded multiline composer,
-five-file draft strip, file-type icons and expandable sent-file groups. Reading
-older messages pauses automatic following; sending or tapping Latest resumes it.
-
-Runtime controls attachment availability. Incoming human-agent text, typing, and
-transfer status are handled automatically, matching the WebSDK. Contact-center
-form links and surveys are enabled by default:
-
-```swift
-let configuration = SDKConfiguration(
-    environment: "dev",
-    connection: ConnectionConfig(
-        projectId: "your-project-id",
-        endpoint: "https://runtime.example.com",
-        apiKey: "pk_your_public_key"
-    ),
-    channel: ChannelConfig(channelName: "mobile"),
-    attachments: AttachmentConfig(maxFileSizeBytes: 20 * 1024 * 1024)
-)
-```
-
-The attachment button uses `attachmentLimits.enabled` from Runtime's SDK
-init/refresh response: `true` shows the button and `false` hides it. The session
-must also grant `attachment:write`; missing or null attachment limits hide the
-button. Local `features.enableAttachments` and theme `attachmentButtonEnabled`
-do not control its visibility. Refresh responses that omit `attachmentLimits`
-preserve the last received policy. Disabling attachments or revoking permission
-cancels uploads and prevents attachment sends;
-text chat remains usable. The stock picker filters allowed MIME types. All
-staged files, including failed/cancelled files, count toward the five-file limit.
-Uploads are sequential, bounded to at most 20 MiB per nonempty file, and have
-individual progress, cancel, retry and remove controls. Failed sends retain the
-batch and text. Signed download URLs are resolved only when opening a file; a
-server-local storage URL uses the authenticated delivery-URL route instead.
-
-### Agent audio and video calls
-
-Incoming agent call controls are enabled by default. Set
-`FeaturesConfig(enableContactCenter: false)` to disable Contact Center features.
-For YAML configuration, set `features.enable_contact_center: false` to opt out.
-Runtime must also enable Contact Center and provide the session call
-capabilities. The native chat supports accepting or declining calls, audio and
-video, mute, camera toggle, and hangup. The call uses the same AudioCodes WebRTC
-stack and SIP signaling values as the Web SDK.
-
-The default AudioCodes bundle URL is
-`<connection.endpoint>/api/sdk/assets/contact-center/ac_webrtc-1.19.0.min.js`.
-Set `ContactCenterConfig(sipStackUrl: "https://your-host/ac_webrtc.min.js")`
-when your Runtime host serves that asset elsewhere. A YAML configuration can
-use `contact_center.sip_stack_url`. The host app's `Info.plist` must include
-`NSMicrophoneUsageDescription`; video calls also require
-`NSCameraUsageDescription`. The example app includes both entries.
-The Runtime and SIP asset must use HTTPS; HTTP is accepted only for loopback
-development hosts such as `localhost`.
-
-Transferred-agent support includes queue/connection notices, plain-text messages,
-typing, safe external forms, scoped attachments, failed-delivery indicators and
-NPS/CSAT/like-dislike surveys. Survey success requires its matching transfer-survey
-acknowledgment; ordinary feedback acknowledgments cannot complete it. Survey
-definitions absent from Runtime history still require server event replay after
-an offline close. Screen sharing, co-browsing, AI voice, OAuth cards, omnichannel
-continuity and outbound calling are outside this commit's scope. Generic rich
-feedback supports thumbs and star ratings with retryable acknowledgment states;
-unsupported scale/text templates show an availability message instead of sending
-an incorrect rating type.
-
-These are local source changes, not a published release. This repository contains
-the matching `ArtemisSocketSDK` source under `Sources/ArtemisSocketSDK`. SwiftPM
-builds it as a separate product alongside `ArtemisUISDK`. CocoaPods compiles both
-source trees into the single `ArtemisUISDK` module. From `Example`, use:
-
-```ruby
-pod 'ArtemisUISDK', :path => '..'
-```
-
-Run `pod install` after source or podspec changes so the generated project includes
-new files. Import only `ArtemisUISDK` in a CocoaPods host; do not add the separate
-socket pod to that target. The existing published version numbers have not been
-changed here.
-
-The socket layer now supports server-authored user display/redaction, early and
-withheld renders, owned cancellation and late-frame suppression, canonical
-envelopes/renderables/citations/provenance, occurrence-aware history merging,
-restored action locks and policy-controlled activity. Potentially accepted turns,
-uploads and surveys are never silently replayed. Hosted bootstrap can use
-an asynchronous `bootstrapTokenProvider` closure on `ConnectionConfig`; omit
-public-key channel/user selection for hosted bootstrap. Persistent opaque
-client-session identity and unlimited transient retries remain opt-in: pass
-`clientSessionIdentifier: true` to `ConnectionConfig` and
-`unlimitedTransientRetries: true` to `ReconnectionConfig`. Credentials are not cached.
-
-Equivalent YAML additions live under the existing `artemis_sdk` root:
-
-```yaml
-features:
-  enable_history: true
-  enable_citations: true
-attachments:
-  max_file_size_bytes: 20971520
-  allowed_mime_types: [application/pdf, text/plain, image/jpeg, image/png]
-session:
-  idle_disconnect_timeout_ms: 600000
-  end_session_on_idle: false
-  stale_session_refresh_ms: 0
-  end_session_on_close: false
-```
-
-`connection` also accepts `client_session_identifier` and `session_metadata`;
-`websocket.reconnection` accepts `unlimited_transient_retries`. Token providers
-are programmatic only. Existing YAML keys and public initialization methods
-remain available. Live Runtime/provider acceptance is separate from the offline
-protocol and native UI tests in this repository.
-
-### UI source organization
-
-Each built-in template has its own SwiftUI `View` struct and file under
-`Sources/ArtemisUISDK/Templates/`. `RichTemplateViews.swift` selects the templates
-for a message, while `Templates/Shared/` contains reusable cards, styles, and
-formatting helpers. The default header and message composer live in
-`Components/ChatHeaderView.swift` and `Components/ChatFooterView.swift`.
-These implementation types are internal; host apps customize the UI through
-the existing header/footer builders and `RichTemplateRegistry`.
-
 ## Chat presentation features
 
 The stock UI now supports these additions, using the WebSDK chat and template
@@ -415,6 +287,32 @@ Interaction visibility responds to a tap/hover and the accessible Show timestamp
 action. Locale and timezone formatting follow the SwiftUI environment. The
 default localized date uses day, abbreviated month and year (for example,
 `23 Nov 2026`) to match the Web SDK display.
+Parent applications can set the complete timestamp format through
+`SDKConfiguration.theme`, for example:
+
+```swift
+let configuration = SDKConfiguration(
+    environment: "dev",
+    connection: ConnectionConfig(
+        projectId: "your-project-id",
+        endpoint: "https://runtime.example.com"
+    ),
+    theme: ThemeConfig(
+        messageTimestampFormat: "EE, MMM dd yyyy 'at' hh:mm:ss a"
+    )
+)
+```
+
+The same setting is available in the SDK YAML theme block as
+`message_timestamp_format`.
+
+When set, the complete pattern takes precedence over the separate date and time
+style settings.
+
+Supported date formats are `locale`, `mm-dd-yy`, `dd-mm-yy` and `mmm-dd-yyyy`;
+supported time formats are `locale`, `12h` and `24h`. Explicit
+`ChatUIOptions.timestamps` take precedence over `SDKConfiguration.theme`, which
+takes precedence over Runtime `widgetConfig.theme` values.
 Use `appearance: .system` to follow the host color scheme or `.dark` to force
 dark appearance. Light appearance is the default and is independent of the
 host app's color scheme.

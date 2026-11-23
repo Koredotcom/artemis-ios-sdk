@@ -109,6 +109,63 @@ final class WebFeatureParityTests: XCTestCase {
         XCTAssertEqual(invalidValues.timestamps.position, .below)
         XCTAssertEqual(invalidValues.timestamps.timeFormat, .locale)
     }
+    func testParentSDKConfigurationOverridesRuntimeTimestampFormats() throws {
+        let sdkTheme = ThemeConfig(
+            messageTimestampTimeFormat: "24h", messageTimestampDateFormat: "dd-mm-yy")
+        let result = theme(
+            [
+                "messageTimestampTimeFormat": "12h",
+                "messageTimestampDateFormat": "mmm-dd-yyyy",
+            ], sdkTheme: sdkTheme)
+
+        XCTAssertEqual(result.timestamps.timeFormat, .twentyFourHour)
+        XCTAssertEqual(result.timestamps.dateFormat, .dayMonthYear)
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-01-02T13:05:00Z"))
+        XCTAssertEqual(
+            result.timestamps.format(
+                date, locale: Locale(identifier: "en"),
+                timeZone: TimeZone(secondsFromGMT: 0)!),
+            "02/01/26 • 13:05")
+
+        let yamlConfiguration = try ArtemisSocketSDK.SDKConfigurationLoader.load(
+            yaml: """
+                artemis_sdk:
+                  connection:
+                    project_id: p
+                    endpoint: https://fixture.invalid
+                    api_key: fixture
+                  theme:
+                    message_timestamp_time_format: 24h
+                    message_timestamp_date_format: dd-mm-yy
+                """)
+        XCTAssertEqual(yamlConfiguration.theme.messageTimestampTimeFormat, "24h")
+        XCTAssertEqual(yamlConfiguration.theme.messageTimestampDateFormat, "dd-mm-yy")
+    }
+    func testParentSDKCustomTimestampPattern() throws {
+        let pattern = "EE, MMM dd yyyy 'at' hh:mm:ss a"
+        let result = theme(
+            ["messageTimestampFormat": "yyyy"],
+            sdkTheme: ThemeConfig(messageTimestampFormat: pattern))
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-23T07:48:00Z"))
+
+        XCTAssertEqual(
+            result.timestamps.format(
+                date, locale: Locale(identifier: "en"),
+                timeZone: TimeZone(secondsFromGMT: 19_800)!),
+            "Mon, Nov 23 2026 at 01:18:00 pm")
+
+        let yamlConfiguration = try ArtemisSocketSDK.SDKConfigurationLoader.load(
+            yaml: """
+                artemis_sdk:
+                  connection:
+                    project_id: p
+                    endpoint: https://fixture.invalid
+                    api_key: fixture
+                  theme:
+                    message_timestamp_format: "EE, MMM dd yyyy 'at' hh:mm:ss a"
+                """)
+        XCTAssertEqual(yamlConfiguration.theme.messageTimestampFormat, pattern)
+    }
     func testTypedFormValidationRejectsMalformedValuesAndPreservesOptionalFields() {
         for value in ["", "not-an-email", "a@", "a@-bad.com", "a b@example.com"] {
             XCTAssertNotNil(FormFieldValidation.error(value: value, required: true, inputType: "email"))
@@ -273,12 +330,13 @@ final class WebFeatureParityTests: XCTestCase {
         XCTAssertEqual(
             client.getMessages().last?.metadata?["toolName"]?.value as? String, "Visible tool")
     }
-    private func theme(_ raw: [String: Any]) -> ChatTheme {
+    private func theme(_ raw: [String: Any], sdkTheme: ThemeConfig = .default) -> ChatTheme {
         ChatTheme(
             configuration: SDKConfiguration(
                 environment: "dev",
                 connection: ConnectionConfig(
-                    projectId: "p", endpoint: "https://example.com", apiKey: "fixture")),
+                    projectId: "p", endpoint: "https://example.com", apiKey: "fixture"),
+                theme: sdkTheme),
             widgetConfig: WidgetConfig(raw: ["theme": raw]))
     }
 }

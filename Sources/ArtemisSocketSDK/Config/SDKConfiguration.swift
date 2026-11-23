@@ -337,6 +337,12 @@ public struct ThemeConfig: Sendable {
     public let borderRadius: Double
     public let fontFamily: String
     public let darkMode: Bool
+    /// Optional Foundation date-format pattern for the complete timestamp.
+    public let messageTimestampFormat: String?
+    /// Timestamp time style: `locale`, `12h`, or `24h`.
+    public let messageTimestampTimeFormat: String?
+    /// Timestamp date style: `locale`, `mm-dd-yy`, `dd-mm-yy`, or `mmm-dd-yyyy`.
+    public let messageTimestampDateFormat: String?
 
     public static let `default` = ThemeConfig()
 
@@ -347,7 +353,10 @@ public struct ThemeConfig: Sendable {
         surfaceColor: String = "#F5F5F5",
         borderRadius: Double = 12,
         fontFamily: String = "System",
-        darkMode: Bool = false
+        darkMode: Bool = false,
+        messageTimestampFormat: String? = nil,
+        messageTimestampTimeFormat: String? = nil,
+        messageTimestampDateFormat: String? = nil
     ) {
         self.primaryColor = primaryColor
         self.textColor = textColor
@@ -356,6 +365,9 @@ public struct ThemeConfig: Sendable {
         self.borderRadius = borderRadius
         self.fontFamily = fontFamily
         self.darkMode = darkMode
+        self.messageTimestampFormat = messageTimestampFormat
+        self.messageTimestampTimeFormat = messageTimestampTimeFormat
+        self.messageTimestampDateFormat = messageTimestampDateFormat
     }
 }
 
@@ -620,7 +632,13 @@ enum SDKConfigurationParser {
                 surfaceColor: themeMap["surface_color"] as? String ?? "#F5F5F5",
                 borderRadius: doubleValue(themeMap["border_radius"], default: 12),
                 fontFamily: themeMap["font_family"] as? String ?? "System",
-                darkMode: themeMap["dark_mode"] as? Bool ?? false
+                darkMode: themeMap["dark_mode"] as? Bool ?? false,
+                messageTimestampFormat: themeMap["message_timestamp_format"] as? String
+                    ?? themeMap["messageTimestampFormat"] as? String,
+                messageTimestampTimeFormat: themeMap["message_timestamp_time_format"] as? String
+                    ?? themeMap["messageTimestampTimeFormat"] as? String,
+                messageTimestampDateFormat: themeMap["message_timestamp_date_format"] as? String
+                    ?? themeMap["messageTimestampDateFormat"] as? String
             ),
             debug: DebugConfig(
                 enabled: debugMap["enabled"] as? Bool ?? false,

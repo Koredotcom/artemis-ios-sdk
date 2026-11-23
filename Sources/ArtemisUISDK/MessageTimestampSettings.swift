@@ -23,15 +23,18 @@ public struct MessageTimestampSettings: Sendable, Equatable {
     public var position: Position
     public var timeFormat: TimeFormat
     public var dateFormat: DateFormat
+    public var customFormat: String?
     public init(
         enabled: Bool = true, visibility: Visibility = .always, position: Position = .below,
-        timeFormat: TimeFormat = .locale, dateFormat: DateFormat = .locale
+        timeFormat: TimeFormat = .locale, dateFormat: DateFormat = .locale,
+        customFormat: String? = nil
     ) {
         self.enabled = enabled
         self.visibility = visibility
         self.position = position
         self.timeFormat = timeFormat
         self.dateFormat = dateFormat
+        self.customFormat = customFormat
     }
     init(runtime: [String: Any]) {
         self.init(
@@ -42,19 +45,43 @@ public struct MessageTimestampSettings: Sendable, Equatable {
             timeFormat: TimeFormat(rawValue: runtime["messageTimestampTimeFormat"] as? String ?? "")
                 ?? .locale,
             dateFormat: DateFormat(rawValue: runtime["messageTimestampDateFormat"] as? String ?? "")
-                ?? .locale)
+                ?? .locale,
+            customFormat: runtime["messageTimestampFormat"] as? String)
     }
-    init(widgetTheme: WidgetTheme?) {
+    init(widgetTheme: WidgetTheme?, configurationTheme: ThemeConfig? = nil) {
+        let configuredTimeFormat = TimeFormat(
+            rawValue: configurationTheme?.messageTimestampTimeFormat ?? "")
+        let configuredDateFormat = DateFormat(
+            rawValue: configurationTheme?.messageTimestampDateFormat ?? "")
+        let customFormat: String?
+        if let configuredFormat = Self.nonEmpty(configurationTheme?.messageTimestampFormat) {
+            customFormat = configuredFormat
+        } else if configuredTimeFormat == nil, configuredDateFormat == nil {
+            customFormat = Self.nonEmpty(widgetTheme?.messageTimestampFormat)
+        } else {
+            customFormat = nil
+        }
         self.init(
             enabled: widgetTheme?.messageTimestampEnabled ?? true,
             visibility: Visibility(rawValue: widgetTheme?.messageTimestampVisibility ?? "") ?? .always,
             position: Position(rawValue: widgetTheme?.messageTimestampPosition ?? "") ?? .below,
-            timeFormat: TimeFormat(rawValue: widgetTheme?.messageTimestampTimeFormat ?? "") ?? .locale,
-            dateFormat: DateFormat(rawValue: widgetTheme?.messageTimestampDateFormat ?? "") ?? .locale)
+            timeFormat: configuredTimeFormat
+                ?? TimeFormat(rawValue: widgetTheme?.messageTimestampTimeFormat ?? "") ?? .locale,
+            dateFormat: configuredDateFormat
+                ?? DateFormat(rawValue: widgetTheme?.messageTimestampDateFormat ?? "") ?? .locale,
+            customFormat: customFormat)
     }
     public func format(_ date: Date, locale: Locale = .current, timeZone: TimeZone = .current)
         -> String
     {
+        if let customFormat = Self.nonEmpty(customFormat) {
+            let formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.timeZone = timeZone
+            formatter.dateFormat = customFormat
+            return Self.normalize(formatter.string(from: date), formatter: formatter, locale: locale)
+        }
+
         let day = DateFormatter()
         day.locale = locale
         day.timeZone = timeZone
@@ -74,10 +101,30 @@ public struct MessageTimestampSettings: Sendable, Equatable {
         case .twelveHour: time.dateFormat = "h:mm a"
         case .twentyFourHour: time.dateFormat = "HH:mm"
         }
-        let formattedTime = time.string(from: date)
+        let localizedTime = Self.normalize(time.string(from: date), formatter: time, locale: locale)
+        return day.string(from: date) + " • " + localizedTime
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalize(
+        _ value: String, formatter: DateFormatter, locale: Locale
+    ) -> String {
+        var normalized = value
             .replacingOccurrences(of: "\u{00A0}", with: " ")
             .replacingOccurrences(of: "\u{202F}", with: " ")
-        let localizedTime = locale.languageCode == "en" ? formattedTime.lowercased() : formattedTime
-        return day.string(from: date) + " • " + localizedTime
+        if locale.languageCode == "en" {
+            for symbol in [formatter.amSymbol, formatter.pmSymbol].compactMap({ $0 })
+                where !symbol.isEmpty
+            {
+                normalized = normalized.replacingOccurrences(
+                    of: symbol, with: symbol.lowercased(), options: [.caseInsensitive])
+            }
+        }
+        return normalized
     }
 }

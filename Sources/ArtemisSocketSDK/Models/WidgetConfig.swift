@@ -65,6 +65,7 @@ public struct WidgetTheme: Sendable {
     public let launcherWelcomeMessage: String?
     public let offset: Int?
     public let darkMode: Bool?
+    public let messageTimestampFormat: String?
     public let messageTimestampEnabled: Bool?
     public let messageTimestampVisibility: String?
     public let messageTimestampPosition: String?
@@ -109,6 +110,7 @@ public struct WidgetTheme: Sendable {
         self.launcherWelcomeMessage = raw["launcherWelcomeMessage"] as? String
         self.offset = Self.asInt(raw["offset"])
         self.darkMode = raw["darkMode"] as? Bool
+        self.messageTimestampFormat = raw["messageTimestampFormat"] as? String
         self.messageTimestampEnabled = Self.asBool(raw["messageTimestampEnabled"])
         self.messageTimestampVisibility = raw["messageTimestampVisibility"] as? String
         self.messageTimestampPosition = raw["messageTimestampPosition"] as? String
