@@ -188,6 +188,7 @@ public struct AgentChatView: View {
                             },
                             presentation: model.presentation, showCitations: model.citationsEnabled,
                             showAgentLinks: model.contactCenterEnabled,
+                            showAnsweredByAI: model.showAnsweredByAI,
                             enableMessageFeedback: options.enableMessageFeedback && model.feedbackEnabled,
                             feedbackState: options.enableMessageFeedback && message.role == .assistant
                                 ? model.presentation.feedback(for: message.id) : nil,
@@ -546,6 +547,7 @@ struct MessageBubble: View {
     var presentation: ChatPresentationState? = nil
     var showCitations = true
     var showAgentLinks = false
+    var showAnsweredByAI = false
     var enableMessageFeedback = false
     var feedbackState: MessageFeedbackState? = nil
     var feedbackEnabled = false
@@ -567,6 +569,11 @@ struct MessageBubble: View {
     }
     private var isAgentTransferSystemMessage: Bool {
         message.role == .system && isAgentTransferMessage
+    }
+    private var shouldShowAnsweredByAI: Bool {
+        showAnsweredByAI && message.role == .assistant
+            && message.messageSource?["system"]?.value as? String != "integration"
+            && message.status != .streaming
     }
     private var hasBotResponseTemplate: Bool {
         message.role == .assistant
@@ -631,6 +638,20 @@ struct MessageBubble: View {
                         alignment: .leading)
                     .padding(.top, hasBubbleContent ? 4 : 0)
                     .simultaneousGesture(TapGesture().onEnded { timestampInteracting.toggle() })
+            }
+            if shouldShowAnsweredByAI {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(hexString: theme?.primaryColor))
+                        .accessibilityHidden(true)
+                    Text(strings("Answered by AI"))
+                        .font(theme?.font(size: 11) ?? .system(size: 11))
+                        .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
+                }
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if enableMessageFeedback, message.role == .assistant, message.status == .complete,

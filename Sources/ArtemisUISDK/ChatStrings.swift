@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// SDK-owned copy only. Server-authored prompts and message content are never translated here.
-/// Supply overrides using the English source text as keys, or an ArtemisChat.strings table in the host bundle.
+/// Supply overrides using English source text as keys, or localized strings in the host bundle.
 public struct ChatStrings: Sendable, Equatable {
     public var localeIdentifier: String
     public var fallbackLocaleIdentifier: String
@@ -20,16 +20,25 @@ public struct ChatStrings: Sendable, Equatable {
     public func callAsFunction(_ key: String) -> String {
         if let value = overrides[key] { return value }
         let fallback = Self.defaults[key] ?? key
-        guard let root = Bundle(url: bundleURL) else { return fallback }
+        let roots: [Bundle]
+        #if SWIFT_PACKAGE
+            roots = [Bundle(url: bundleURL), Bundle.module].compactMap { $0 }
+        #else
+            roots = [Bundle(url: bundleURL)].compactMap { $0 }
+        #endif
         let candidates = [
             localeIdentifier, localeIdentifier.replacingOccurrences(of: "_", with: "-"),
             String(localeIdentifier.prefix(while: { $0 != "_" && $0 != "-" })), fallbackLocaleIdentifier,
         ]
         for locale in candidates {
-            if let path = root.path(forResource: locale, ofType: "lproj"), let bundle = Bundle(path: path) {
-                let value = bundle.localizedString(
-                    forKey: key, value: "__artemis_missing__", table: "ArtemisChat")
-                if value != "__artemis_missing__" { return value }
+            for root in roots {
+                guard let path = root.path(forResource: locale, ofType: "lproj"), let bundle = Bundle(path: path)
+                else { continue }
+                for table in ["ArtemisChat", "Localizable"] {
+                    let value = bundle.localizedString(
+                        forKey: key, value: "__artemis_missing__", table: table)
+                    if value != "__artemis_missing__" { return value }
+                }
             }
         }
         return fallback
@@ -65,6 +74,7 @@ public struct ChatStrings: Sendable, Equatable {
             "The human agent has disconnected. You are now back with the AI assistant.",
         "No agent is available right now. You are back with the AI assistant.":
             "No agent is available right now. You are back with the AI assistant.",
+        "Answered by AI": "Answered by AI",
     ]
 }
 

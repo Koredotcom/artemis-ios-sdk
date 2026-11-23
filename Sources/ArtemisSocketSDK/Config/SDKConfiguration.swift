@@ -414,6 +414,8 @@ public struct FeaturesConfig: Sendable {
     public let enableContactCenter: Bool
     public let enableHistory: Bool
     public let enableCitations: Bool
+    /// Opt in to the assistant attribution displayed below completed AI messages.
+    public let showAnsweredByAI: Bool
 
     public static let `default` = FeaturesConfig()
 
@@ -431,7 +433,8 @@ public struct FeaturesConfig: Sendable {
         enableAttachments: Bool = false,
         enableContactCenter: Bool = true,
         enableHistory: Bool = true,
-        enableCitations: Bool = true
+        enableCitations: Bool = true,
+        showAnsweredByAI: Bool = false
     ) {
         self.enableRichContent = enableRichContent
         self.enableMarkdown = enableMarkdown
@@ -447,6 +450,7 @@ public struct FeaturesConfig: Sendable {
         self.enableContactCenter = enableContactCenter
         self.enableHistory = enableHistory
         self.enableCitations = enableCitations
+        self.showAnsweredByAI = showAnsweredByAI
     }
 }
 
@@ -464,17 +468,21 @@ public struct LocalizationConfig: Sendable {
     public let defaultLocale: String
     public let supportedLocales: [String]
     public let fallbackLocale: String
+    /// Host-provided overrides keyed by the English SDK string.
+    public let overrides: [String: String]
 
     public static let `default` = LocalizationConfig()
 
     public init(
         defaultLocale: String = "en",
         supportedLocales: [String] = ["en", "es", "fr"],
-        fallbackLocale: String = "en"
+        fallbackLocale: String = "en",
+        overrides: [String: String] = [:]
     ) {
         self.defaultLocale = defaultLocale
         self.supportedLocales = supportedLocales
         self.fallbackLocale = fallbackLocale
+        self.overrides = overrides
     }
 }
 
@@ -667,12 +675,16 @@ enum SDKConfigurationParser {
                 enableAttachments: featuresMap["enable_attachments"] as? Bool ?? false,
                 enableContactCenter: featuresMap["enable_contact_center"] as? Bool ?? true,
                 enableHistory: featuresMap["enable_history"] as? Bool ?? true,
-                enableCitations: featuresMap["enable_citations"] as? Bool ?? true
+                enableCitations: featuresMap["enable_citations"] as? Bool ?? true,
+                showAnsweredByAI: featuresMap["show_answered_by_ai"] as? Bool
+                    ?? featuresMap["showAnsweredByAI"] as? Bool ?? false
             ),
             localization: LocalizationConfig(
                 defaultLocale: localizationMap["default_locale"] as? String ?? "en",
                 supportedLocales: localizationMap["supported_locales"] as? [String] ?? ["en", "es", "fr"],
-                fallbackLocale: localizationMap["fallback_locale"] as? String ?? "en"
+                fallbackLocale: localizationMap["fallback_locale"] as? String ?? "en",
+                overrides: (localizationMap["overrides"] as? [String: Any] ?? [:])
+                    .compactMapValues { $0 as? String }
             ),
             security: SecurityConfig(
                 enforceTls: securityMap["enforce_tls"] as? Bool ?? true,
@@ -685,7 +697,7 @@ enum SDKConfigurationParser {
                 idleDisconnectTimeoutMs: intValue(sessionMap["idle_disconnect_timeout_ms"], default: 0),
                 endSessionOnIdle: sessionMap["end_session_on_idle"] as? Bool ?? false,
                 staleSessionRefreshMs: intValue(sessionMap["stale_session_refresh_ms"], default: 0),
-                endSessionOnClose: sessionMap["end_session_on_close"] as? Bool ?? false
+                endSessionOnClose: sessionMap["end_session_on_close"] as? Bool ?? true
             ),
             attachments: AttachmentConfig(
                 maxFileSizeBytes: Int64(intValue(attachmentsMap["max_file_size_bytes"], default: 20 * 1024 * 1024)),

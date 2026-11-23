@@ -462,6 +462,9 @@ public enum AgentChatUI {
     @Published public private(set) var theme: ChatTheme?
     @Published public private(set) var strings = ChatStrings()
     private var stringOverrides: ChatStrings?
+    var showAnsweredByAI: Bool {
+        sdk?.configuration.features.showAnsweredByAI ?? configuration?.features.showAnsweredByAI ?? false
+    }
     public func configureStrings(_ overrides: ChatStrings?) {
         stringOverrides = overrides
         let localization = sdk?.configuration.localization ?? configuration?.localization
@@ -469,7 +472,8 @@ public enum AgentChatUI {
             overrides
             ?? ChatStrings(
                 localeIdentifier: localization?.defaultLocale ?? "en",
-                fallbackLocaleIdentifier: localization?.fallbackLocale ?? "en")
+                fallbackLocaleIdentifier: localization?.fallbackLocale ?? "en",
+                overrides: localization?.overrides ?? [:])
     }
     @Published public var errorMessage: String?
     @Published public var composeText = ""
