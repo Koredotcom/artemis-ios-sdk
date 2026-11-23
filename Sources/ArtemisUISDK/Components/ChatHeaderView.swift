@@ -19,7 +19,9 @@ struct ChatHeaderView: View {
                 Text(title).font(
                     theme?.font(size: 17, weight: .semibold) ?? .system(size: 17, weight: .semibold)
                 ).lineLimit(1)
-                Text(statusText).font(.system(size: 11)).opacity(0.85).lineLimit(1)
+                if !statusText.isEmpty {
+                    Text(statusText).font(.system(size: 11)).opacity(0.85).lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 0) {

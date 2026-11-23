@@ -311,6 +311,13 @@ public struct AgentChatView: View {
         performCloseChat()
     }
 
+    @MainActor private func dismissChatKeyboard() {
+        #if os(iOS)
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
+    }
+
     private func confirmMinimizeChat() {
         dismissCloseOrMinimizePopup()
         minimizeChat()
@@ -321,15 +328,22 @@ public struct AgentChatView: View {
             headerBuilder(
                 ChatHeaderContext(
                     title: title, theme: model.theme, onMinimize: minimizeChat, onClose: closeChat,
-                    statusText: model.statusText, canMinimize: handle != nil))
+                    statusText: headerStatusText, canMinimize: handle != nil))
         } else {
             ChatHeaderView(
-                title: title, theme: model.theme, onClose: closeChat, statusText: model.statusText,
+                title: title, theme: model.theme, onClose: closeChat, statusText: headerStatusText,
                 onMinimize: handle == nil ? nil : minimizeChat)
+        }
+    }
+    private var headerStatusText: String {
+        switch model.status {
+        case .connected: return ""
+        case .connecting, .notConnected: return model.statusText
         }
     }
     private var closeChat: () -> Void {
         {
+            dismissChatKeyboard()
             if options.closeOrMinimizePopup.isShow {
                 isCloseOrMinimizePopupPresented = true
             } else {
@@ -338,6 +352,7 @@ public struct AgentChatView: View {
         }
     }
     private func performCloseChat() {
+        dismissChatKeyboard()
         model.emitHostEvent(
             AgentChatEvent(
                 eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
@@ -501,6 +516,10 @@ struct MessageBubble: View {
     var timestampSettings: MessageTimestampSettings? = nil
     var submitMessageFeedback: ((Int, String?) async throws -> Void)? = nil
     var isUser: Bool { message.role == .user }
+    private var isAgentTransferMessage: Bool {
+        let custom = message.metadata?["custom"]?.value as? [String: Any] ?? [:]
+        return custom["source"] as? String == "agent-transfer"
+    }
     private var hasBotResponseTemplate: Bool {
         message.role == .assistant
             && (message.richContent != nil || separatesActions
@@ -611,7 +630,9 @@ struct MessageBubble: View {
                     Link("[\(citation.index)] \(citation.title)", destination: citation.url).font(.caption)
                 }
             }
-            if message.messageSource?["system"]?.value as? String == "integration" {
+            if message.messageSource?["system"]?.value as? String == "integration",
+                !isAgentTransferMessage
+            {
                 Text(message.messageSource?["provider"]?.value as? String ?? "Support agent").font(
                     .caption2
                 )

@@ -47,6 +47,7 @@ public struct ChatHeaderContext {
     public let theme: ChatTheme?
     public let onMinimize: () -> Void
     public let onClose: () -> Void
+    /// Empty while connected; populated while connecting or disconnected.
     public let statusText: String
     public let canMinimize: Bool
     public init(

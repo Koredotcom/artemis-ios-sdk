@@ -237,6 +237,7 @@ import XCTest
         XCTAssertEqual(
             recorder.lifecycle.map(\.kind), [.connected, .transferred, .disconnected])
         XCTAssertEqual(recorder.lifecycle.first?.agent?.name, "Alex Agent")
+        XCTAssertNil(client.getMessages().first?.messageSource?["provider"])
     }
 
     func testAgentTransferDisconnectCanSuppressStatusMessage() {

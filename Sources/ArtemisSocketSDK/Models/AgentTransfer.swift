@@ -222,6 +222,8 @@ enum AgentTransfer {
         let source = (raw["messageSource"] as? [String: Any]).flatMap { $0.isEmpty ? nil : $0 }
             ?? ["system": "integration", "provider": "smartassist"]
         let sourceProvider = source["provider"] as? String ?? "smartassist"
+        var messageSource = source
+        messageSource.removeValue(forKey: "provider")
         func message(
             _ text: String, role: MessageRole = .assistant, suffix: String = "",
             extra: [String: Any] = [:]
@@ -240,7 +242,7 @@ enum AgentTransfer {
                     "participantType": role == .assistant ? "human_agent" : "system",
                     "agentTransferSource": sourceProvider,
                 ]) { _, new in new }.merging(extra) { _, new in new }.mapValues(AnySendable.init),
-                messageSource: source.mapValues(AnySendable.init))
+                messageSource: messageSource.mapValues(AnySendable.init))
         }
         func text(_ keys: [String]) -> String { firstNonEmpty(keys) ?? "" }
         var messages: [Message] = []
@@ -311,7 +313,7 @@ enum AgentTransfer {
                         id: "agent-transfer-survey-\(parsed.artemisSessionId)", role: .assistant,
                         content: parsed.prompt, timestamp: date,
                         metadata: ["agentTransferSurvey": AnySendable(survey)],
-                        messageSource: source.mapValues(AnySendable.init)))
+                        messageSource: messageSource.mapValues(AnySendable.init)))
             }
         default: break
         }

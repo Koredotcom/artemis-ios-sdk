@@ -84,6 +84,13 @@ private lazy var chatHandle = AgentChatUI.initialize(
 )
 ```
 
+`agent_transfer_event` frames are normalized into transcript messages for agent
+messages, forms, attachments, notices, and disconnects. Delivery IDs are
+deduplicated per transfer session. Lifecycle events matching the Web SDK are
+available from `AgentSDK.chatEvents` as
+`.agentTransferLifecycle(AgentTransferLifecycleEvent)` for connected,
+transferred, and disconnected transitions.
+
 The SDK reports `BotConnectionStatus` with reason `1` when connected and reason
 `2` after a connected session disconnects, `BotClosed` with reason `3` when the
 user taps Close, and `BotMinimized` with reason `4` when the user taps Minimize.
