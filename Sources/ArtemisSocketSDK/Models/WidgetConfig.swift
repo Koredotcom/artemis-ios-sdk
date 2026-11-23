@@ -65,6 +65,11 @@ public struct WidgetTheme: Sendable {
     public let launcherWelcomeMessage: String?
     public let offset: Int?
     public let darkMode: Bool?
+    public let messageTimestampEnabled: Bool?
+    public let messageTimestampVisibility: String?
+    public let messageTimestampPosition: String?
+    public let messageTimestampTimeFormat: String?
+    public let messageTimestampDateFormat: String?
     public let attachmentButtonEnabled: Bool
     public let raw: [String: AnySendable]
 
@@ -104,6 +109,11 @@ public struct WidgetTheme: Sendable {
         self.launcherWelcomeMessage = raw["launcherWelcomeMessage"] as? String
         self.offset = Self.asInt(raw["offset"])
         self.darkMode = raw["darkMode"] as? Bool
+        self.messageTimestampEnabled = Self.asBool(raw["messageTimestampEnabled"])
+        self.messageTimestampVisibility = raw["messageTimestampVisibility"] as? String
+        self.messageTimestampPosition = raw["messageTimestampPosition"] as? String
+        self.messageTimestampTimeFormat = raw["messageTimestampTimeFormat"] as? String
+        self.messageTimestampDateFormat = raw["messageTimestampDateFormat"] as? String
         let flag = raw["attachmentButtonEnabled"] as? NSNumber
         self.attachmentButtonEnabled =
             (flag.map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false)
@@ -118,5 +128,12 @@ public struct WidgetTheme: Sendable {
         if let double = value as? Double { return Int(exactly: double.rounded(.towardZero)) }
         if let string = value as? String { return Int(string) }
         return nil
+    }
+
+    private static func asBool(_ value: Any?) -> Bool? {
+        guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return flag.boolValue
     }
 }

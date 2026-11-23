@@ -240,7 +240,7 @@ public struct ChatTheme: Sendable {
         backgroundImageURL = server?.backgroundImage.flatMap(URL.init(string:)).flatMap {
             $0.isHTTP ? $0 : nil
         }
-        timestamps = MessageTimestampSettings(runtime: server?.raw.mapValues(\.value) ?? [:])
+        timestamps = MessageTimestampSettings(widgetTheme: server)
         let dark: Bool
         switch appearance {
         case .system: dark = server?.darkMode ?? (base.darkMode || systemDarkMode)

@@ -369,7 +369,7 @@ behavior as the reference:
 | Feature | Native behavior |
 | --- | --- |
 | Ordinary assistant feedback | Opt-in thumbs, an optional negative-feedback comment, acknowledgment-driven status and retry; template feedback is kept separate. |
-| Timestamps | Runtime theme settings or host overrides; show/hide, above/below, interaction visibility, locale/12/24-hour time and date formats. Only committed user/assistant messages receive timestamps. |
+| Timestamps | Runtime theme settings or host overrides; show/hide, above/below, interaction visibility, day-first localized dates, and locale/12/24-hour time and date formats. Only committed user/assistant messages receive timestamps. |
 | Typed forms | Native date/time pickers, number/email/date/time validation, select validation and field-level errors. Date/time values retain `yyyy-MM-dd` / `HH:mm` wire formats. |
 | Markdown | Native headings, nested ordered/unordered lists, fenced code, tables, blockquotes, rules, images and inline formatting. Unsafe link schemes are disabled. |
 | UI strings | Host overrides and a host-bundle `ArtemisChat.strings` table, selected using the SDK locale configuration. English is the fallback; authored server prompts remain unchanged. |
@@ -412,7 +412,9 @@ modifier. Omit `timestamps` to use Runtime `messageTimestampEnabled`,
 `messageTimestampVisibility`, `messageTimestampPosition`,
 `messageTimestampTimeFormat` and `messageTimestampDateFormat` settings.
 Interaction visibility responds to a tap/hover and the accessible Show timestamp
-action. Locale and timezone formatting follow the SwiftUI environment.
+action. Locale and timezone formatting follow the SwiftUI environment. The
+default localized date uses day, abbreviated month and year (for example,
+`23 Nov 2026`) to match the Web SDK display.
 Use `appearance: .system` to follow the host color scheme or `.dark` to force
 dark appearance. Light appearance is the default and is independent of the
 host app's color scheme.

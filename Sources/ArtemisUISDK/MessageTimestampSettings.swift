@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(ArtemisSocketSDK)
+    import ArtemisSocketSDK
+#endif
+
 public struct MessageTimestampSettings: Sendable, Equatable {
     public enum Visibility: String, Sendable { case always, interaction }
     public enum Position: String, Sendable { case above, below }
@@ -40,6 +44,14 @@ public struct MessageTimestampSettings: Sendable, Equatable {
             dateFormat: DateFormat(rawValue: runtime["messageTimestampDateFormat"] as? String ?? "")
                 ?? .locale)
     }
+    init(widgetTheme: WidgetTheme?) {
+        self.init(
+            enabled: widgetTheme?.messageTimestampEnabled ?? true,
+            visibility: Visibility(rawValue: widgetTheme?.messageTimestampVisibility ?? "") ?? .always,
+            position: Position(rawValue: widgetTheme?.messageTimestampPosition ?? "") ?? .below,
+            timeFormat: TimeFormat(rawValue: widgetTheme?.messageTimestampTimeFormat ?? "") ?? .locale,
+            dateFormat: DateFormat(rawValue: widgetTheme?.messageTimestampDateFormat ?? "") ?? .locale)
+    }
     public func format(_ date: Date, locale: Locale = .current, timeZone: TimeZone = .current)
         -> String
     {
@@ -47,7 +59,9 @@ public struct MessageTimestampSettings: Sendable, Equatable {
         day.locale = locale
         day.timeZone = timeZone
         switch dateFormat {
-        case .locale: day.dateStyle = .medium
+        // Match the Web SDK's day-first locale output while keeping the
+        // abbreviated month localized for the active locale.
+        case .locale: day.dateFormat = "d MMM yyyy"
         case .monthDayYear: day.dateFormat = "MM/dd/yy"
         case .dayMonthYear: day.dateFormat = "dd/MM/yy"
         case .namedMonthDayYear: day.dateFormat = "MMM dd, yyyy"
@@ -60,6 +74,10 @@ public struct MessageTimestampSettings: Sendable, Equatable {
         case .twelveHour: time.dateFormat = "h:mm a"
         case .twentyFourHour: time.dateFormat = "HH:mm"
         }
-        return day.string(from: date) + " • " + time.string(from: date)
+        let formattedTime = time.string(from: date)
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+        let localizedTime = locale.languageCode == "en" ? formattedTime.lowercased() : formattedTime
+        return day.string(from: date) + " • " + localizedTime
     }
 }

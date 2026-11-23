@@ -68,9 +68,46 @@ final class WebFeatureParityTests: XCTestCase {
         XCTAssertTrue(
             twelve.format(
                 date, locale: Locale(identifier: "en_US"), timeZone: TimeZone(secondsFromGMT: 0)!
-            ).contains("1:05 PM"))
+            ).contains("1:05 pm"))
         XCTAssertEqual(
             MessageTimestampSettings(runtime: ["messageTimestampPosition": "invalid"]), .init())
+    }
+    func testTimestampSettingsAreAppliedFromWidgetConfigTheme() throws {
+        let result = theme([
+            "messageTimestampEnabled": false,
+            "messageTimestampPosition": "above",
+            "messageTimestampTimeFormat": "24h",
+        ])
+
+        XCTAssertFalse(result.timestamps.enabled)
+        XCTAssertEqual(result.timestamps.position, .above)
+        XCTAssertEqual(result.timestamps.timeFormat, .twentyFourHour)
+
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-01-02T13:05:00Z"))
+        XCTAssertEqual(
+            result.timestamps.format(
+                date, locale: Locale(identifier: "en_US"),
+                timeZone: TimeZone(secondsFromGMT: 0)!),
+            "2 Jan 2026 • 13:05")
+
+        let webStyleDate = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-11-23T07:48:00Z"))
+        XCTAssertEqual(
+            MessageTimestampSettings().format(
+                webStyleDate, locale: Locale(identifier: "en"),
+                timeZone: TimeZone(secondsFromGMT: 19_800)!),
+            "23 Nov 2026 • 1:18 pm")
+
+        XCTAssertTrue(theme([:]).timestamps.enabled)
+        XCTAssertEqual(theme([:]).timestamps.position, .below)
+        XCTAssertEqual(theme([:]).timestamps.timeFormat, .locale)
+        XCTAssertTrue(theme(["messageTimestampEnabled": 0]).timestamps.enabled)
+        let invalidValues = theme([
+            "messageTimestampPosition": "left",
+            "messageTimestampTimeFormat": "military",
+        ])
+        XCTAssertEqual(invalidValues.timestamps.position, .below)
+        XCTAssertEqual(invalidValues.timestamps.timeFormat, .locale)
     }
     func testTypedFormValidationRejectsMalformedValuesAndPreservesOptionalFields() {
         for value in ["", "not-an-email", "a@", "a@-bad.com", "a b@example.com"] {
