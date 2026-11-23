@@ -138,7 +138,7 @@ enum AgentTransfer {
             let text = "No agent is available right now. You are back with the AI assistant."
             return (text, text)
         }
-        let text = "Human agent has disconnected. You are now back with the AI assistant."
+        let text = "The human agent has disconnected. You are now back with the AI assistant."
         return (text, text)
     }
     static func lifecycleEvent(

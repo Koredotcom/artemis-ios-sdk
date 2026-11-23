@@ -61,8 +61,8 @@ public struct ChatStrings: Sendable, Equatable {
         "validation.time": "Choose a valid time.",
         "Waiting for a human agent.": "Waiting for a human agent.",
         "Connected to a human agent.": "Connected to a human agent.",
-        "Human agent has disconnected. You are now back with the AI assistant.":
-            "Human agent has disconnected. You are now back with the AI assistant.",
+        "The human agent has disconnected. You are now back with the AI assistant.":
+            "The human agent has disconnected. You are now back with the AI assistant.",
         "No agent is available right now. You are back with the AI assistant.":
             "No agent is available right now. You are back with the AI assistant.",
     ]

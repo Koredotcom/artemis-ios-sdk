@@ -520,6 +520,9 @@ struct MessageBubble: View {
         let custom = message.metadata?["custom"]?.value as? [String: Any] ?? [:]
         return custom["source"] as? String == "agent-transfer"
     }
+    private var isAgentTransferSystemMessage: Bool {
+        message.role == .system && isAgentTransferMessage
+    }
     private var hasBotResponseTemplate: Bool {
         message.role == .assistant
             && (message.richContent != nil || separatesActions
@@ -543,7 +546,25 @@ struct MessageBubble: View {
         if separatesActions { types.insert(RichTemplateTypes.actions) }
         return types
     }
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if isAgentTransferSystemMessage {
+            Text(
+                message.metadata?["sdkStringKey"]?.value as? String == nil
+                    ? message.content : strings(message.content)
+            )
+            .font(theme?.font(size: 14).weight(.regular) ?? .system(size: 14))
+            .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(width: rowWidth, alignment: .center)
+            .textSelection(.enabled)
+        } else {
+            messageContent
+        }
+    }
+
+    private var messageContent: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
             if effectiveTimestamps.position == .above { timestampView }
             if hasBubbleContent {

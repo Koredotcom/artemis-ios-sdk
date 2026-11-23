@@ -186,6 +186,25 @@ import XCTest
         XCTAssertEqual(client.getMessages().last?.content, "Human-agent reply")
         XCTAssertEqual(recorder.messages.last?.content, "Human-agent reply")
     }
+    func testAgentTransferLifecycleStatusMessagesUseExpectedCopy() {
+        let (client, _, _) = fixture()
+        client.handleServerMessage(transferFrame("agent:queued"))
+        client.handleServerMessage(transferFrame("agent:connected"))
+        client.handleServerMessage(transferFrame("agent:disconnected"))
+
+        let messages = client.getMessages()
+        XCTAssertEqual(messages.map(\.role), [.system, .system, .system])
+        XCTAssertEqual(
+            messages.map(\.content),
+            [
+                "Waiting for a human agent.",
+                "Connected to a human agent.",
+                "The human agent has disconnected. You are now back with the AI assistant.",
+            ])
+        XCTAssertEqual(
+            messages.compactMap { $0.metadata?["sdkStringKey"]?.value as? String },
+            messages.map(\.content))
+    }
     func testTransferSuppressesAssistantStreamAndDeduplicatesProviderDelivery() async throws {
         let (client, _, recorder) = fixture(contact: true)
         client.handleServerMessage(frame("response_start", ["messageId": "assistant"]))
@@ -247,6 +266,12 @@ import XCTest
                 "agent:disconnected",
                 data: ["closeMessage": "The chat became an email ticket.", "disconnectReason": "transfer_to_email"]))
         XCTAssertEqual(client.getMessages().map(\.content), ["The chat became an email ticket."])
+
+        client.handleServerMessage(
+            transferFrame("agent:disconnected", data: ["disconnectReason": "agent_closed"]))
+        XCTAssertEqual(
+            client.getMessages().last?.content,
+            "The human agent has disconnected. You are now back with the AI assistant.")
     }
     func testAgentTypingSurvivesUserSendAndUnrelatedAssistantEvents() async throws {
         let (client, session, recorder) = fixture(activity: true)
