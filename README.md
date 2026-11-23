@@ -309,6 +309,11 @@ The same setting is available in the SDK YAML theme block as
 When set, the complete pattern takes precedence over the separate date and time
 style settings.
 
+To keep phone numbers in chat text from becoming clickable links, set
+`disabledNumbersHyperlink: true` in `ThemeConfig`. It defaults to `false`, so
+phone numbers are linkified unless the parent application disables them. The
+YAML theme key is `disabled_numbers_hyperlink`.
+
 Supported date formats are `locale`, `mm-dd-yy`, `dd-mm-yy` and `mmm-dd-yyyy`;
 supported time formats are `locale`, `12h` and `24h`. Explicit
 `ChatUIOptions.timestamps` take precedence over `SDKConfiguration.theme`, which

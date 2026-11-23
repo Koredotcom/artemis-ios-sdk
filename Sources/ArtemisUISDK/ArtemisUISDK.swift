@@ -217,6 +217,7 @@ public struct ChatTheme: Sendable {
     }
     public let darkMode: Bool
     public let timestamps: MessageTimestampSettings
+    public let disabledNumbersHyperlink: Bool
     public init(
         configuration: SDKConfiguration, widgetConfig: WidgetConfig? = nil, systemDarkMode: Bool = false,
         appearance: ChatAppearance = .system
@@ -242,6 +243,7 @@ public struct ChatTheme: Sendable {
         }
         timestamps = MessageTimestampSettings(
             widgetTheme: server, configurationTheme: configuration.theme)
+        disabledNumbersHyperlink = base.disabledNumbersHyperlink
         let dark: Bool
         switch appearance {
         case .system: dark = server?.darkMode ?? (base.darkMode || systemDarkMode)

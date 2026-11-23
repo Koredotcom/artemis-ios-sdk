@@ -343,6 +343,8 @@ public struct ThemeConfig: Sendable {
     public let messageTimestampTimeFormat: String?
     /// Timestamp date style: `locale`, `mm-dd-yy`, `dd-mm-yy`, or `mmm-dd-yyyy`.
     public let messageTimestampDateFormat: String?
+    /// When true, phone numbers in chat text are not automatically converted to links.
+    public let disabledNumbersHyperlink: Bool
 
     public static let `default` = ThemeConfig()
 
@@ -356,7 +358,8 @@ public struct ThemeConfig: Sendable {
         darkMode: Bool = false,
         messageTimestampFormat: String? = nil,
         messageTimestampTimeFormat: String? = nil,
-        messageTimestampDateFormat: String? = nil
+        messageTimestampDateFormat: String? = nil,
+        disabledNumbersHyperlink: Bool = false
     ) {
         self.primaryColor = primaryColor
         self.textColor = textColor
@@ -368,6 +371,7 @@ public struct ThemeConfig: Sendable {
         self.messageTimestampFormat = messageTimestampFormat
         self.messageTimestampTimeFormat = messageTimestampTimeFormat
         self.messageTimestampDateFormat = messageTimestampDateFormat
+        self.disabledNumbersHyperlink = disabledNumbersHyperlink
     }
 }
 
@@ -638,7 +642,9 @@ enum SDKConfigurationParser {
                 messageTimestampTimeFormat: themeMap["message_timestamp_time_format"] as? String
                     ?? themeMap["messageTimestampTimeFormat"] as? String,
                 messageTimestampDateFormat: themeMap["message_timestamp_date_format"] as? String
-                    ?? themeMap["messageTimestampDateFormat"] as? String
+                    ?? themeMap["messageTimestampDateFormat"] as? String,
+                disabledNumbersHyperlink: themeMap["disabled_numbers_hyperlink"] as? Bool
+                    ?? themeMap["disabledNumbersHyperlink"] as? Bool ?? false
             ),
             debug: DebugConfig(
                 enabled: debugMap["enabled"] as? Bool ?? false,

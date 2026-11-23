@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 
 @testable import ArtemisSocketSDK
 @testable import ArtemisUISDK
@@ -236,6 +237,34 @@ final class WebFeatureParityTests: XCTestCase {
             ChatMarkdownCache.text("[safe](https://example.com)").runs.contains {
                 $0.link?.host == "example.com"
             })
+    }
+    @MainActor func testDetectedLinksAndPhoneNumbersKeepTheMessageTextColor() {
+        let messageTextColor = Color(red: 0.12, green: 0.34, blue: 0.56)
+        let rendered = ChatMarkdownCache.text(
+            "Call +1 (415) 555-0132 or 212-555-0140, then visit [the site](https://example.com).",
+            linkColor: messageTextColor)
+        let linkedRuns = rendered.runs.filter { $0.link != nil }
+
+        XCTAssertEqual(
+            Set(linkedRuns.compactMap { $0.link?.absoluteString }),
+            ["tel:+14155550132", "tel:2125550140", "https://example.com"])
+        XCTAssertTrue(linkedRuns.allSatisfy { $0.foregroundColor == messageTextColor })
+        XCTAssertTrue(linkedRuns.allSatisfy { $0.underlineStyle != nil })
+    }
+    @MainActor func testParentConfigurationCanDisableAutomaticPhoneLinks() {
+        XCTAssertFalse(theme([:]).disabledNumbersHyperlink)
+
+        let parentTheme = ThemeConfig(disabledNumbersHyperlink: true)
+        XCTAssertTrue(theme([:], sdkTheme: parentTheme).disabledNumbersHyperlink)
+        XCTAssertTrue(
+            SDKConfigurationParser.parse(from: ["theme": ["disabled_numbers_hyperlink": true]])
+                .theme.disabledNumbersHyperlink)
+
+        let rendered = ChatMarkdownCache.text(
+            "Call 415-555-0132 or visit [the site](https://example.com).",
+            disabledNumbersHyperlink: true)
+        XCTAssertEqual(
+            Set(rendered.runs.compactMap { $0.link?.absoluteString }), ["https://example.com"])
     }
     func testStringOverridesFallbackAndPlaceholdersDoNotRewriteUserData() {
         let strings = ChatStrings(

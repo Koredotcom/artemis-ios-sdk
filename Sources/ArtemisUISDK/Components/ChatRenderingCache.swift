@@ -13,8 +13,13 @@ import SwiftUI
         cache.totalCostLimit = 512 * 1024
         return cache
     }()
-    static func text(_ source: String) -> AttributedString {
-        if let entry = cache.object(forKey: source as NSString) { return entry.text }
+    static func text(
+        _ source: String, linkColor: Color? = nil, disabledNumbersHyperlink: Bool = false
+    ) -> AttributedString {
+        let cacheKey = "\(disabledNumbersHyperlink ? "disabled" : "enabled"):" + source
+        if let entry = cache.object(forKey: cacheKey as NSString) {
+            return applyingLinkColor(linkColor, to: entry.text)
+        }
         var result =
             (try? AttributedString(
                 markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
@@ -25,8 +30,64 @@ import SwiftUI
                 && url.user == nil && url.password == nil ? nil : run.range
         }
         for range in unsafeLinks { result[range].link = nil }
-        cache.setObject(Entry(result), forKey: source as NSString, cost: source.utf8.count * 2)
+        if !disabledNumbersHyperlink { ChatPhoneNumberLinkifier.apply(to: &result) }
+        cache.setObject(Entry(result), forKey: cacheKey as NSString, cost: source.utf8.count * 2)
+        return applyingLinkColor(linkColor, to: result)
+    }
+
+    private static func applyingLinkColor(_ color: Color?, to source: AttributedString) -> AttributedString {
+        var result = source
+        let linkedRanges = result.runs.compactMap { run in run.link == nil ? nil : run.range }
+        for range in linkedRanges {
+            if let color { result[range].foregroundColor = color }
+            result[range].underlineStyle = .single
+        }
         return result
+    }
+}
+
+/// Adds the same underlined, tappable treatment to phone numbers that are found in rendered chat text.
+@MainActor private enum ChatPhoneNumberLinkifier {
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.phoneNumber.rawValue)
+
+    static func apply(to text: inout AttributedString) {
+        guard let detector else { return }
+        let renderedText = String(text.characters)
+        let matches = detector.matches(in: renderedText, range: NSRange(renderedText.startIndex..., in: renderedText))
+
+        for match in matches {
+            guard match.resultType == .phoneNumber,
+                let stringRange = Range(match.range, in: renderedText),
+                let start = AttributedString.Index(stringRange.lowerBound, within: text),
+                let end = AttributedString.Index(stringRange.upperBound, within: text),
+                let phoneNumber = match.phoneNumber,
+                let url = telephoneURL(for: phoneNumber)
+            else { continue }
+
+            let attributedRange = start..<end
+            let alreadyLinked = text.runs.contains { run in
+                run.link != nil && run.range.overlaps(attributedRange)
+            }
+            guard !alreadyLinked else { continue }
+
+            text[attributedRange].link = url
+            text[attributedRange].underlineStyle = .single
+        }
+    }
+
+    private static func telephoneURL(for phoneNumber: String) -> URL? {
+        // A tel URL must not contain formatting whitespace. Keep the international prefix
+        // and dialable characters while dropping display-only punctuation.
+        var dialableNumber = ""
+        for character in phoneNumber {
+            if character.isNumber || "*#,;".contains(character) {
+                dialableNumber.append(character)
+            } else if character == "+", dialableNumber.isEmpty {
+                dialableNumber.append(character)
+            }
+        }
+        guard dialableNumber.contains(where: \.isNumber) else { return nil }
+        return URL(string: "tel:\(dialableNumber)")
     }
 }
 

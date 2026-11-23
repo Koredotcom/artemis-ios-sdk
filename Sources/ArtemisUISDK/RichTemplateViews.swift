@@ -15,12 +15,20 @@ struct RichContentTemplatesView: View {
 
     private var richContent: RichContent? { message.richContent }
     private var actions: ActionSet? { message.actions }
+    private var messageTextColor: Color {
+        message.role == .user
+            ? Color(hexString: chatTheme?.userBubbleTextColor)
+            : Color(hexString: chatTheme?.assistantBubbleTextColor)
+    }
 
     var body: some View {
         if richContent != nil || (actions != nil && !isSuppressed(RichTemplateTypes.actions)) {
             VStack(alignment: .leading, spacing: templateStyle.sectionSpacing) {
                 if !isSuppressed("markdown"), let markdown = richContent?.markdown, !markdown.templateTrimmed.isEmpty {
-                    ChatMarkdownView(content: markdown, fillsAvailableWidth: fillsAvailableWidth)
+                    ChatMarkdownView(
+                        content: markdown, linkColor: messageTextColor,
+                        disabledNumbersHyperlink: chatTheme?.disabledNumbersHyperlink ?? false,
+                        fillsAvailableWidth: fillsAvailableWidth)
                 } else if !isSuppressed(RichTemplateTypes.html), let html = richContent?.html?.templateTrimmed,
                     !html.isEmpty
                 {

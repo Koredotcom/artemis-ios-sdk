@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 indirect enum MarkdownBlock: Equatable {
     case paragraph(String)
@@ -224,21 +227,44 @@ enum ChatMarkdownParser {
 }
 
 struct ChatMarkdownView: View {
+    @Environment(\.openURL) private var hostOpenURL
     let content: String
+    var linkColor: Color? = nil
+    var disabledNumbersHyperlink = false
     var fillsAvailableWidth = true
 
     var body: some View {
-        MarkdownBlocksView(blocks: ChatMarkdownParser.parse(content))
+        MarkdownBlocksView(
+            blocks: ChatMarkdownParser.parse(content), linkColor: linkColor,
+            disabledNumbersHyperlink: disabledNumbersHyperlink)
             .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
+            .environment(\.openURL, OpenURLAction { url in
+                if url.scheme?.lowercased() == "tel" {
+                    #if canImport(UIKit)
+                    UIApplication.shared.open(url)
+                    return .handled
+                    #else
+                    return .systemAction
+                    #endif
+                }
+
+                // Keep any URL policy or routing supplied by the parent application.
+                hostOpenURL(url)
+                return .handled
+            })
     }
 }
 
 private struct MarkdownBlocksView: View {
     let blocks: [MarkdownBlock]
+    let linkColor: Color?
+    let disabledNumbersHyperlink: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlockView(block: block)
+                MarkdownBlockView(
+                    block: block, linkColor: linkColor,
+                    disabledNumbersHyperlink: disabledNumbersHyperlink)
             }
         }
     }
@@ -246,6 +272,8 @@ private struct MarkdownBlocksView: View {
 private struct MarkdownBlockView: View {
     @Environment(\.chatTheme) private var theme
     let block: MarkdownBlock
+    let linkColor: Color?
+    let disabledNumbersHyperlink: Bool
     var body: some View {
         switch block {
         case .paragraph(let text): inline(text)
@@ -265,14 +293,20 @@ private struct MarkdownBlockView: View {
         case .quote(let blocks):
             HStack(alignment: .top, spacing: 10) {
                 Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 3)
-                AnyView(MarkdownBlocksView(blocks: blocks))
+                AnyView(
+                    MarkdownBlocksView(
+                        blocks: blocks, linkColor: linkColor,
+                        disabledNumbersHyperlink: disabledNumbersHyperlink))
             }.fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, blocks in
                     HStack(alignment: .top, spacing: 8) {
                         Text(ordered ? "\(start + index)." : "•").frame(minWidth: 18, alignment: .trailing)
-                        AnyView(MarkdownBlocksView(blocks: blocks))
+                        AnyView(
+                            MarkdownBlocksView(
+                                blocks: blocks, linkColor: linkColor,
+                                disabledNumbersHyperlink: disabledNumbersHyperlink))
                     }
                 }
             }
@@ -310,7 +344,10 @@ private struct MarkdownBlockView: View {
         }
     }
     private func inline(_ value: String) -> some View {
-        Text(ChatMarkdownCache.text(value)).textSelection(.enabled).fixedSize(
+        Text(
+            ChatMarkdownCache.text(
+                value, linkColor: linkColor, disabledNumbersHyperlink: disabledNumbersHyperlink)
+        ).textSelection(.enabled).fixedSize(
             horizontal: false, vertical: true)
     }
 }

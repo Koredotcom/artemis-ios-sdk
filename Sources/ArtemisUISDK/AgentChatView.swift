@@ -7,11 +7,13 @@ import UniformTypeIdentifiers
 
 #if os(iOS)
     import UIKit
+    import SafariServices
 #endif
 
 public struct AgentChatView: View {
     @StateObject private var model: AgentChatViewModel
     @Environment(\.artemisChatOptions) private var environmentOptions
+    @Environment(\.openURL) private var hostOpenURL
     private let providedOptions: ChatUIOptions?
     private var options: ChatUIOptions { providedOptions ?? environmentOptions }
     private var preferredChatColorScheme: ColorScheme? {
@@ -29,6 +31,9 @@ public struct AgentChatView: View {
     @State private var showPhotoPicker = false
     @State private var showCameraPicker = false
     @State private var isCloseOrMinimizePopupPresented = false
+    #if os(iOS)
+        @State private var safariPresentation: ChatSafariPresentation?
+    #endif
     private var strings: ChatStrings { options.strings ?? model.strings }
     private var isOfflineConnectionError: Bool {
         guard let message = model.errorMessage?.lowercased() else { return false }
@@ -92,8 +97,28 @@ public struct AgentChatView: View {
 
     public var body: some View {
         chatContent
+            .environment(\.openURL, OpenURLAction { url in
+                if url.isHTTP {
+                    #if os(iOS)
+                        safariPresentation = ChatSafariPresentation(url: url)
+                        return .handled
+                    #else
+                        hostOpenURL(url)
+                        return .handled
+                    #endif
+                }
+
+                // Preserve the host app's handling for non-web URLs such as tel: and mailto:.
+                hostOpenURL(url)
+                return .handled
+            })
             .overlay(alignment: .center) { closeOrMinimizePopupOverlay }
             .animation(.easeOut(duration: 0.2), value: isCloseOrMinimizePopupPresented)
+            #if os(iOS)
+                .sheet(item: $safariPresentation) { presentation in
+                    ChatSafariViewController(url: presentation.url)
+                }
+            #endif
     }
 
     private var chatContent: some View {
@@ -418,6 +443,21 @@ public struct AgentChatView: View {
 }
 
 #if os(iOS)
+    private struct ChatSafariPresentation: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
+    private struct ChatSafariViewController: UIViewControllerRepresentable {
+        let url: URL
+
+        func makeUIViewController(context: Context) -> SFSafariViewController {
+            SFSafariViewController(url: url)
+        }
+
+        func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+    }
+
     /// Resign the focused composer or form field in this chat's window when a call appears.
     struct IncomingCallKeyboardDismissal: UIViewRepresentable {
         func makeUIView(context: Context) -> KeyboardDismissalView { KeyboardDismissalView() }
@@ -516,6 +556,11 @@ struct MessageBubble: View {
     var timestampSettings: MessageTimestampSettings? = nil
     var submitMessageFeedback: ((Int, String?) async throws -> Void)? = nil
     var isUser: Bool { message.role == .user }
+    private var messageTextColor: Color {
+        isUser
+            ? Color(hexString: theme?.userBubbleTextColor)
+            : Color(hexString: theme?.assistantBubbleTextColor)
+    }
     private var isAgentTransferMessage: Bool {
         let custom = message.metadata?["custom"]?.value as? [String: Any] ?? [:]
         return custom["source"] as? String == "agent-transfer"
@@ -635,7 +680,10 @@ struct MessageBubble: View {
                             ?? (message.role == .system ? .caption : .body)
                     ).textSelection(.enabled)
                 } else {
-                    ChatMarkdownView(content: message.content, fillsAvailableWidth: !isUser && !separatesActions)
+                    ChatMarkdownView(
+                        content: message.content, linkColor: messageTextColor,
+                        disabledNumbersHyperlink: theme?.disabledNumbersHyperlink ?? false,
+                        fillsAvailableWidth: !isUser && !separatesActions)
                         .textSelection(.enabled)
                 }
             }
@@ -672,11 +720,7 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 16 * (theme?.spacingScale ?? 1))
         .padding(.vertical, 12 * (theme?.spacingScale ?? 1))
-        .foregroundStyle(
-            isUser
-                ? Color(hexString: theme?.userBubbleTextColor)
-                : Color(hexString: theme?.assistantBubbleTextColor)
-        )
+        .foregroundStyle(messageTextColor)
         .background(
             isUser
                 ? Color(hexString: theme?.userBubbleColor) : Color(hexString: theme?.assistantBubbleColor)
