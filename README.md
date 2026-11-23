@@ -410,6 +410,31 @@ Use `appearance: .system` to follow the host color scheme or `.dark` to force
 dark appearance. Light appearance is the default and is independent of the
 host app's color scheme.
 
+Tapping Close displays a localized close/minimize confirmation by default.
+Hosts can disable it through `ChatUIOptions` to close immediately:
+
+```swift
+let options = ChatUIOptions(
+    closeOrMinimizePopup: CloseOrMinimizePopupConfiguration(isShow: false)
+)
+```
+
+Popup labels are supplied by the SDK's `Localizable.strings` resource and can
+be localized by adding the corresponding locale resource to the SDK. English
+is the default. The parent app can select a bundled language through the
+configuration's `LocalizationConfig`:
+
+```swift
+localization: LocalizationConfig(
+    defaultLocale: "bg",
+    supportedLocales: ["en", "ar", "bg"],
+    fallbackLocale: "en"
+)
+```
+
+The popup follows `defaultLocale` and uses `fallbackLocale` when that locale
+does not have a bundled translation.
+
 UI string keys are the English source copy; validation keys use the
 `validation.*` namespace. String overrides take precedence over the host's
 `<locale>.lproj/ArtemisChat.strings`, then its configured fallback locale and

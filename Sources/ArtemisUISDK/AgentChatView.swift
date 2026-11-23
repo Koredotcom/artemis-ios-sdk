@@ -28,6 +28,7 @@ public struct AgentChatView: View {
     @State private var showFilePicker = false
     @State private var showPhotoPicker = false
     @State private var showCameraPicker = false
+    @State private var isCloseOrMinimizePopupPresented = false
     private var strings: ChatStrings { options.strings ?? model.strings }
     private var isOfflineConnectionError: Bool {
         guard let message = model.errorMessage?.lowercased() else { return false }
@@ -90,6 +91,12 @@ public struct AgentChatView: View {
     }
 
     public var body: some View {
+        chatContent
+            .overlay(alignment: .center) { closeOrMinimizePopupOverlay }
+            .animation(.easeOut(duration: 0.2), value: isCloseOrMinimizePopupPresented)
+    }
+
+    private var chatContent: some View {
         VStack(spacing: 0) {
             headerView
             if !model.isInternetAvailable {
@@ -280,6 +287,35 @@ public struct AgentChatView: View {
             fonts?.family.map { .custom($0, size: model.theme?.baseFontSize ?? 16) }
                 ?? model.theme?.font())
     }
+    @ViewBuilder private var closeOrMinimizePopupOverlay: some View {
+        if isCloseOrMinimizePopupPresented {
+            CloseOrMinimizePopup(
+                canMinimize: handle != nil,
+                localeIdentifier: strings.localeIdentifier,
+                fallbackLocaleIdentifier: strings.fallbackLocaleIdentifier,
+                onCancel: dismissCloseOrMinimizePopup,
+                onClose: confirmCloseChat,
+                onMinimize: confirmMinimizeChat
+            )
+            .transition(.opacity)
+            .zIndex(1)
+        }
+    }
+
+    private func dismissCloseOrMinimizePopup() {
+        isCloseOrMinimizePopupPresented = false
+    }
+
+    private func confirmCloseChat() {
+        dismissCloseOrMinimizePopup()
+        performCloseChat()
+    }
+
+    private func confirmMinimizeChat() {
+        dismissCloseOrMinimizePopup()
+        minimizeChat()
+    }
+
     @ViewBuilder private var headerView: some View {
         if let headerBuilder {
             headerBuilder(
@@ -294,16 +330,23 @@ public struct AgentChatView: View {
     }
     private var closeChat: () -> Void {
         {
-            model.emitHostEvent(
-                AgentChatEvent(
-                    eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
-            if let handle = handle {
-                handle.endSession()
+            if options.closeOrMinimizePopup.isShow {
+                isCloseOrMinimizePopupPresented = true
             } else {
-                model.stop(endingSession: true)
+                performCloseChat()
             }
-            (onClose ?? { dismiss() })()
         }
+    }
+    private func performCloseChat() {
+        model.emitHostEvent(
+            AgentChatEvent(
+                eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
+        if let handle = handle {
+            handle.endSession()
+        } else {
+            model.stop(endingSession: true)
+        }
+        (onClose ?? { dismiss() })()
     }
     private var minimizeChat: () -> Void {
         {

@@ -9,7 +9,7 @@ public struct ChatStrings: Sendable, Equatable {
     public var overrides: [String: String]
     public var bundleURL: URL
     public init(
-        localeIdentifier: String = Locale.current.identifier, fallbackLocaleIdentifier: String = "en",
+        localeIdentifier: String = "en", fallbackLocaleIdentifier: String = "en",
         overrides: [String: String] = [:], bundle: Bundle = .main
     ) {
         self.localeIdentifier = localeIdentifier

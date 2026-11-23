@@ -17,6 +17,7 @@ Pod::Spec.new do |s|
   s.module_name = 'ArtemisUISDK'
   s.source_files = 'Sources/ArtemisUISDK/**/*.swift', 'Sources/ArtemisSocketSDK/**/*.swift'
   s.resource_bundles = {
+    'ArtemisUISDK_Resources' => ['Sources/ArtemisUISDK/Resources/**/*.strings'],
     'ArtemisUISDK_Privacy' => ['Sources/ArtemisSocketSDK/PrivacyInfo.xcprivacy']
   }
   s.frameworks = 'Foundation', 'SwiftUI', 'Combine', 'UIKit', 'CryptoKit', 'AVKit', 'AVFoundation', 'WebKit'

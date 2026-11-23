@@ -7,6 +7,16 @@ public enum ChatAppearance: Sendable, Equatable {
     case dark
 }
 
+/// Controls whether tapping the chat's Close button asks for confirmation.
+public struct CloseOrMinimizePopupConfiguration: Sendable, Equatable {
+    /// When false, tapping Close closes the chat immediately.
+    public var isShow: Bool
+
+    public init(isShow: Bool = true) {
+        self.isShow = isShow
+    }
+}
+
 /// Presentation options shared by the stock chat and its built-in templates.
 public struct ChatUIOptions: Sendable, Equatable {
     public var enableMessageFeedback: Bool
@@ -14,17 +24,20 @@ public struct ChatUIOptions: Sendable, Equatable {
     public var strings: ChatStrings?
     public var timestamps: MessageTimestampSettings?
     public var appearance: ChatAppearance
+    public var closeOrMinimizePopup: CloseOrMinimizePopupConfiguration
 
     public init(
         enableMessageFeedback: Bool = false, feedbackCommentMaxLength: Int = 500,
         timestamps: MessageTimestampSettings? = nil, strings: ChatStrings? = nil,
-        appearance: ChatAppearance = .light
+        appearance: ChatAppearance = .light,
+        closeOrMinimizePopup: CloseOrMinimizePopupConfiguration = .init()
     ) {
         self.enableMessageFeedback = enableMessageFeedback
         self.timestamps = timestamps
         self.strings = strings
         self.feedbackCommentMaxLength = min(4000, max(1, feedbackCommentMaxLength))
         self.appearance = appearance
+        self.closeOrMinimizePopup = closeOrMinimizePopup
     }
 }
 

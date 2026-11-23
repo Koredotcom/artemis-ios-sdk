@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "ArtemisUISDK",
+    defaultLocalization: "en",
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "ArtemisUISDK", targets: ["ArtemisUISDK"]),
@@ -21,7 +22,8 @@ let package = Package(
         .target(
             name: "ArtemisUISDK",
             dependencies: ["ArtemisSocketSDK"],
-            path: "Sources/ArtemisUISDK"
+            path: "Sources/ArtemisUISDK",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "ArtemisUISDKTests",

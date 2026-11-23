@@ -464,7 +464,7 @@ public enum AgentChatUI {
         strings =
             overrides
             ?? ChatStrings(
-                localeIdentifier: localization?.defaultLocale ?? Locale.current.identifier,
+                localeIdentifier: localization?.defaultLocale ?? "en",
                 fallbackLocaleIdentifier: localization?.fallbackLocale ?? "en")
     }
     @Published public var errorMessage: String?
