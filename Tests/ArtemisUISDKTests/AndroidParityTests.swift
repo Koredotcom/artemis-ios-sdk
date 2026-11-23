@@ -173,13 +173,14 @@ import XCTest
         try await client.performAction(actionId: "a", value: nil, formData: nil, renderId: "r", displayText: "A")
         XCTAssertEqual(client.getMessages().map(\.content), ["A"])
     }
-    func testTransferReceivesWithoutOptInAndIgnoresStaleTransitions() {
+    func testTransferRendersStaleNoticeWithoutRegressingTransferState() {
         let (client, _, recorder) = fixture()
         let transfer = transferFrame("agent:connected", timestamp: "2026-10-15T10:00:00Z")
         client.handleServerMessage(transfer)
         client.handleServerMessage(transferFrame("agent:queued", timestamp: "2026-10-15T09:00:00Z"))
         XCTAssertEqual(recorder.transfers.last, .connected)
-        XCTAssertEqual(client.getMessages().count, 1)
+        XCTAssertEqual(client.getMessages().count, 2)
+        XCTAssertEqual(client.getMessages().last?.content, "Waiting for a human agent.")
         client.handleServerMessage(
             transferFrame("agent:message", data: ["message": "", "text": "Human-agent reply", "messageId": "agent-1"]))
         XCTAssertEqual(client.getMessages().last?.content, "Human-agent reply")
@@ -199,6 +200,52 @@ import XCTest
         XCTAssertEqual(client.getMessages().filter { $0.content == "Agent text" }.count, 1)
         XCTAssertEqual(recorder.messages.filter { $0.content == "Agent text" }.count, 1)
         XCTAssertEqual(recorder.typing.last, false)
+    }
+
+    func testAgentTransferLifecycleAndTerminalTranscriptMatchWebSDKBehavior() {
+        let (client, _, recorder) = fixture()
+        client.handleServerMessage(
+            transferFrame(
+                "agent:connected",
+                data: ["noticeText": "Connected to Alex.", "agentInfo": ["fullName": "Alex Agent"]]))
+        client.handleServerMessage(transferFrame("agent:transferred", data: ["initiatedBy": "agent"]))
+        client.handleServerMessage(transferFrame("agent:joined", data: ["noticeText": "Alex joined."]))
+        client.handleServerMessage(transferFrame("agent:exited", data: ["noticeText": "Alex left."]))
+        client.handleServerMessage(
+            transferFrame(
+                "agent:notice", data: ["noticeText": "Please try again.", "code": "message_failed"]))
+
+        let disconnect = transferFrame(
+            "agent:disconnected",
+            data: [
+                "deliveryId": "delivery-disconnect-1",
+                "closeMessage": "The agent has now closed this conversation.",
+                "terminalChatPayload": true,
+                "disconnectReason": "no_agents",
+            ])
+        client.handleServerMessage(disconnect)
+        client.handleServerMessage(disconnect)
+
+        XCTAssertEqual(
+            client.getMessages().map { ($0.role, $0.content) }.map { "\($0.0.rawValue):\($0.1)" },
+            [
+                "system:Connected to Alex.", "system:Alex joined.", "system:Alex left.",
+                "system:Please try again.",
+                "assistant:The agent has now closed this conversation.",
+                "system:No agent is available right now. You are back with the AI assistant.",
+            ])
+        XCTAssertEqual(
+            recorder.lifecycle.map(\.kind), [.connected, .transferred, .disconnected])
+        XCTAssertEqual(recorder.lifecycle.first?.agent?.name, "Alex Agent")
+    }
+
+    func testAgentTransferDisconnectCanSuppressStatusMessage() {
+        let (client, _, _) = fixture()
+        client.handleServerMessage(
+            transferFrame(
+                "agent:disconnected",
+                data: ["closeMessage": "The chat became an email ticket.", "disconnectReason": "transfer_to_email"]))
+        XCTAssertEqual(client.getMessages().map(\.content), ["The chat became an email ticket."])
     }
     func testAgentTypingSurvivesUserSendAndUnrelatedAssistantEvents() async throws {
         let (client, session, recorder) = fixture(activity: true)
@@ -398,12 +445,14 @@ import XCTest
     var messages: [Message] = []
     var typing: [Bool] = []
     var transfers: [AgentTransferStatus] = []
+    var lifecycle: [AgentTransferLifecycleEvent] = []
     var activities: [String?] = []
     func chatClient(_ client: ChatClient, didReceive event: ChatEvent) {
         switch event {
         case .messageReceived(let message): messages.append(message)
         case .typingIndicator(let value): typing.append(value)
         case .agentTransferChanged(let value): transfers.append(value)
+        case .agentTransferLifecycle(let value): lifecycle.append(value)
         case .activity(let value): activities.append(value)
         default: break
         }

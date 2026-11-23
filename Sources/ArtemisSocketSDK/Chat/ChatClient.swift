@@ -33,6 +33,9 @@ extension ChatClientDelegate {
     private var transferSessionId: String?
     private var lastTransferTransition = Date.distantPast
     private var transferRevision = 0
+    private var agentTransferDeliverySessionId: String?
+    private var seenAgentTransferDeliveryIDs: [String] = []
+    private var seenAgentTransferDeliveryIDSet = Set<String>()
     private var activityText: String?
     private var assistantIsTyping = false
     private var agentIsTyping = false
@@ -261,7 +264,9 @@ extension ChatClientDelegate {
     func handleServerMessage(_ message: TransportServerMessage) {
         let raw = message.raw
         let id = raw["messageId"] as? String
-        if config.features.enableContactCenter,
+        let isAgentTransferMedia = message.type == "agent_transfer_event"
+            && (raw["event"] as? [String: Any])?["type"] as? String == "agent:media"
+        if (config.features.enableContactCenter || isAgentTransferMedia),
             let event = ContactCenterEventNormalizer.normalize(message)
         {
             delegate?.chatClient(self, didReceive: event)
@@ -431,6 +436,23 @@ extension ChatClientDelegate {
         // Human-agent replies are part of the active transcript, as in the WebSDK.
         // Optional contact-center UI configuration must not discard delivered messages.
         guard let event = AgentTransfer.parse(raw) else { return }
+        if agentTransferDeliverySessionId != event.sessionId {
+            agentTransferDeliverySessionId = event.sessionId
+            seenAgentTransferDeliveryIDs.removeAll(keepingCapacity: true)
+            seenAgentTransferDeliveryIDSet.removeAll(keepingCapacity: true)
+        }
+        if let deliveryId = event.deliveryId,
+            !deliveryId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard seenAgentTransferDeliveryIDSet.insert(deliveryId).inserted else { return }
+            seenAgentTransferDeliveryIDs.append(deliveryId)
+            if seenAgentTransferDeliveryIDs.count > 200 {
+                let evicted = seenAgentTransferDeliveryIDs.removeFirst()
+                seenAgentTransferDeliveryIDSet.remove(evicted)
+            }
+        }
+        // The Web SDK forwards agent media separately from transcript messages.
+        if event.type == "agent:media" { return }
         // Typing can arrive before transfer state has been restored or connected.
         if event.type == "agent:typing" || event.type == "agent:typing_stop" {
             if event.type == "agent:typing" {
@@ -439,13 +461,6 @@ extension ChatClientDelegate {
             }
             setAgentTyping(event.type == "agent:typing", sessionId: event.sessionId)
             if event.type == "agent:typing" { setTyping(false) }
-            return
-        }
-        guard currentSessionId != nil else { return }
-        let transitions = [
-            "agent:queued", "agent:waiting_message", "agent:connected", "agent:disconnected",
-        ]
-        guard !transitions.contains(event.type) || event.timestamp >= lastTransferTransition else {
             return
         }
         for item in event.messages {
@@ -495,6 +510,12 @@ extension ChatClientDelegate {
             agentTypingSessionId == event.sessionId
         {
             setAgentTyping(false)
+        }
+        if ["agent:connected", "agent:transferred", "agent:disconnected"].contains(event.type),
+            let currentSessionId,
+            let lifecycle = AgentTransfer.lifecycleEvent(event, lifecycleSessionId: currentSessionId)
+        {
+            emit(.agentTransferLifecycle(lifecycle))
         }
         emit(.historyLoaded(messages: messages))
     }

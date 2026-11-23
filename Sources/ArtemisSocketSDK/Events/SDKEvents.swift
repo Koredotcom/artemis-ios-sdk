@@ -20,6 +20,44 @@ public enum ConnectionState: String, Sendable {
     case error
 }
 
+/// Safe agent identity attached to an agent lifecycle event.
+public struct AgentTransferAgent: Sendable, Equatable {
+    public let name: String?
+    public let avatarURL: URL?
+
+    public init(name: String? = nil, avatarURL: URL? = nil) {
+        self.name = name
+        self.avatarURL = avatarURL
+    }
+}
+
+/// Typed lifecycle detail corresponding to the Web SDK's agent lifecycle events.
+public struct AgentTransferLifecycleEvent: Sendable, Equatable {
+    public enum Kind: String, Sendable { case connected, transferred, disconnected }
+
+    public let kind: Kind
+    /// Runtime chat session ID, never the internal transfer-routing session ID.
+    public let sessionId: String
+    public let timestamp: String
+    public let transferred: Bool
+    public let initiatedBy: String?
+    public let reason: String?
+    public let agent: AgentTransferAgent?
+
+    public init(
+        kind: Kind, sessionId: String, timestamp: String, transferred: Bool = false,
+        initiatedBy: String? = nil, reason: String? = nil, agent: AgentTransferAgent? = nil
+    ) {
+        self.kind = kind
+        self.sessionId = sessionId
+        self.timestamp = timestamp
+        self.transferred = transferred
+        self.initiatedBy = initiatedBy
+        self.reason = reason
+        self.agent = agent
+    }
+}
+
 /// SDK-level events emitted by [AgentSDK].
 public enum SDKEvent: Sendable {
     case connected(sessionId: String)
@@ -42,6 +80,7 @@ public enum ChatEvent: Sendable {
     case activity(text: String?)
     case responseCancelled(messageId: String?, reason: String)
     case agentTransferChanged(AgentTransferStatus)
+    case agentTransferLifecycle(AgentTransferLifecycleEvent)
     case error(error: Error)
 }
 

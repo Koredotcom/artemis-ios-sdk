@@ -85,6 +85,9 @@ enum AgentTransfer {
         let sessionId: String
         let type: String
         let timestamp: Date
+        let timestampText: String?
+        let deliveryId: String?
+        let data: [String: Any]
         let messages: [Message]
     }
     static func normalizeMetadata(_ raw: [String: Any]) -> [String: Any] {
@@ -113,17 +116,76 @@ enum AgentTransfer {
             "linkType": "agentTransferLinkType",
             "formUrl": "agentTransferFormUrl", "formTitle": "agentTransferFormTitle",
             "formRenderType": "agentTransferFormRenderType",
+            "formName": "agentTransferFormName",
             "formDisplayName": "agentTransferFormDisplayName",
         ] {
             if let value = data[from] as? String { metadata[to] = value }
         }
+    }
+    private static func stableHash(_ value: String) -> String {
+        var hash: UInt32 = 2_166_136_261
+        for codeUnit in value.utf16 {
+            hash = (hash ^ UInt32(codeUnit)) &* 16_777_619
+        }
+        return String(hash, radix: 36)
+    }
+    static func disconnectStatus(_ data: [String: Any]) -> (text: String, stringKey: String)? {
+        let reason = data["disconnectReason"] as? String
+        guard data["suppressDisconnectNotice"] as? Bool != true, reason != "transfer_to_email" else {
+            return nil
+        }
+        if ["wait_timeout", "long_wait", "no_agents"].contains(reason ?? "") {
+            let text = "No agent is available right now. You are back with the AI assistant."
+            return (text, text)
+        }
+        let text = "Human agent has disconnected. You are now back with the AI assistant."
+        return (text, text)
+    }
+    static func lifecycleEvent(
+        _ event: Event, lifecycleSessionId: String
+    ) -> AgentTransferLifecycleEvent? {
+        let agentInfo = event.data["agentInfo"] as? [String: Any]
+        let components = [agentInfo?["firstName"] as? String, agentInfo?["lastName"] as? String]
+            .compactMap { $0 }.compactMap(nonEmpty)
+        let combinedName = components.joined(separator: " ")
+        let name = (agentInfo?["fullName"] as? String).flatMap(nonEmpty)
+            ?? (combinedName.isEmpty ? nil : combinedName)
+        let avatarURL = (agentInfo?["profImageUrl"] as? String)
+            .flatMap { MessageNormalizer.safeWebURL($0) }
+        let agent = (name != nil || avatarURL != nil)
+            ? AgentTransferAgent(name: name, avatarURL: avatarURL) : nil
+        let timestamp = event.timestampText
+            ?? ISO8601DateFormatter().string(from: event.timestamp)
+        switch event.type {
+        case "agent:connected":
+            if event.data["syntheticConnected"] as? Bool == true { return nil }
+            return AgentTransferLifecycleEvent(
+                kind: .connected, sessionId: lifecycleSessionId, timestamp: timestamp,
+                transferred: event.data["transferred"] as? Bool == true, agent: agent)
+        case "agent:transferred":
+            let initiatedBy = (event.data["initiatedBy"] as? String).flatMap(nonEmpty) ?? "unknown"
+            return AgentTransferLifecycleEvent(
+                kind: .transferred, sessionId: lifecycleSessionId, timestamp: timestamp,
+                initiatedBy: initiatedBy)
+        case "agent:disconnected":
+            let reason = (event.data["disconnectReason"] as? String).flatMap(nonEmpty) ?? "unknown"
+            return AgentTransferLifecycleEvent(
+                kind: .disconnected, sessionId: lifecycleSessionId, timestamp: timestamp,
+                reason: reason)
+        default: return nil
+        }
+    }
+    private static func nonEmpty(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
     static func parse(_ raw: [String: Any]) -> Event? {
         guard let session = raw["sessionId"] as? String, !session.isEmpty,
             let event = raw["event"] as? [String: Any], let type = event["type"] as? String,
             [
                 "agent:message", "agent:form", "agent.attachment", "agent:queued", "agent:waiting_message",
-                "agent:connected", "agent:disconnected", "agent:typing", "agent:typing_stop",
+                "agent:connected", "agent:disconnected", "agent:transferred", "agent:media", "agent:joined",
+                "agent:exited", "agent:notice", "agent:typing", "agent:typing_stop",
             ].contains(type)
         else { return nil }
         let data = event["data"] as? [String: Any] ?? [:]
@@ -132,6 +194,7 @@ enum AgentTransfer {
                 !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
         }
+        let timestampText = event["timestamp"] as? String
         let date = MessageNormalizer.timestamp(event["timestamp"])
         let providerID = firstNonEmpty(
             [
@@ -139,16 +202,12 @@ enum AgentTransfer {
                 "attachmentId",
                 "_id", "id",
             ])
-        let fingerprint = [
-            session, type, event["timestamp"] as? String ?? "",
-            firstNonEmpty(["message", "text", "body", "closeMessage"]) ?? "",
+        let fallbackFingerprint = [
+            session, type, timestampText ?? "",
+            firstNonEmpty(["closeMessage", "message", "text", "body"]) ?? "",
             data["linkUrl"] as? String ?? "", data["formUrl"] as? String ?? "",
         ].joined(separator: "|")
-        let stable =
-            providerID
-            ?? SHA256.hash(data: Data(fingerprint.utf8)).prefix(12).map { String(format: "%02x", $0) }
-            .joined()
-        let id = "agent-transfer:\(session):\(type):\(stable)"
+        let stable = providerID ?? stableHash(fallbackFingerprint)
         var metadata: [String: Any] = [
             "agentTransferEventType": type, "agentTransferSessionId": session,
             "contentFormat": "plain_text",
@@ -158,17 +217,30 @@ enum AgentTransfer {
             ],
         ]
         copyLinks(data, into: &metadata)
-        let source = ["system": AnySendable("integration"), "provider": AnySendable("smartassist")]
+        if let timestampText { metadata["agentTransferTimestamp"] = timestampText }
+        if let agentInfo = data["agentInfo"] { metadata["agentInfo"] = agentInfo }
+        let source = (raw["messageSource"] as? [String: Any]).flatMap { $0.isEmpty ? nil : $0 }
+            ?? ["system": "integration", "provider": "smartassist"]
+        let sourceProvider = source["provider"] as? String ?? "smartassist"
         func message(
             _ text: String, role: MessageRole = .assistant, suffix: String = "",
             extra: [String: Any] = [:]
         )
             -> Message
         {
-            Message(
-                id: id + suffix, role: role, content: text, timestamp: date,
-                metadata: metadata.merging(extra) { _, new in new }.mapValues(AnySendable.init),
-                messageSource: source)
+            let fingerprint = [
+                session, type, timestampText ?? "", text,
+                data["linkUrl"] as? String ?? "", data["formUrl"] as? String ?? "",
+            ].joined(separator: "|")
+            let messageId = providerID.map { "agent-transfer:\(session):\(type):\($0)" }
+                ?? "agent-transfer:\(stableHash(fingerprint))"
+            return Message(
+                id: messageId + suffix, role: role, content: text, timestamp: date,
+                metadata: metadata.merging([
+                    "participantType": role == .assistant ? "human_agent" : "system",
+                    "agentTransferSource": sourceProvider,
+                ]) { _, new in new }.merging(extra) { _, new in new }.mapValues(AnySendable.init),
+                messageSource: source.mapValues(AnySendable.init))
         }
         func text(_ keys: [String]) -> String { firstNonEmpty(keys) ?? "" }
         var messages: [Message] = []
@@ -178,42 +250,59 @@ enum AgentTransfer {
             messages = [message(text(["formText", "formTitle", "linkTitle", "message"]))]
         case "agent.attachment":
             if let attachmentID = data["attachmentId"] as? String,
-                data["runtimeSessionId"] as? String != nil
+                let runtimeSessionId = data["runtimeSessionId"] as? String,
+                !attachmentID.isEmpty, !runtimeSessionId.isEmpty
             {
+                let fileName = firstNonEmpty(["fileName"]) ?? "Attachment"
+                let mimeType = firstNonEmpty(["mimeType"]) ?? "application/octet-stream"
+                let sizeBytes = (data["sizeBytes"] as? NSNumber)?.int64Value ?? 0
                 messages = [
                     message(
-                        "",
+                        fileName,
                         extra: [
-                            "attachments": [
-                                [
-                                    "id": attachmentID, "filename": data["fileName"] ?? "Attachment",
-                                    "mimeType": data["mimeType"] ?? "application/octet-stream",
-                                    "sizeBytes": data["sizeBytes"] ?? 0,
-                                ]
-                            ]
+                            "agentTransferEventType": "attachment",
+                            "agentTransferAttachmentId": attachmentID,
+                            "agentTransferRuntimeSessionId": runtimeSessionId,
+                            "agentTransferLinkTitle": fileName,
+                            "agentTransferLinkType": "agent_attachment",
+                            "attachmentIds": [attachmentID],
+                            "attachmentFilenames": [fileName],
+                            "attachmentMimeTypes": [mimeType],
+                            "attachmentSizeBytes": [sizeBytes],
                         ])
                 ]
             }
-        case "agent:queued", "agent:waiting_message":
+        case "agent:queued":
+            let value = "Waiting for a human agent."
+            messages = [message(value, role: .system, extra: ["sdkStringKey": value])]
+        case "agent:waiting_message":
             let value = text(["message", "text", "body"])
             messages = [
                 message(
-                    value.isEmpty ? "Waiting for a human agent…" : value, role: .system,
-                    extra: value.isEmpty ? ["sdkStringKey": "Waiting for a human agent…"] : [:])
+                    value.isEmpty ? "Waiting for a human agent." : value, role: .system,
+                    extra: value.isEmpty ? ["sdkStringKey": "Waiting for a human agent."] : [:])
             ]
         case "agent:connected":
+            let notice = firstNonEmpty(["noticeText"])
+            var extra: [String: Any] = notice == nil
+                ? ["sdkStringKey": "Connected to a human agent."] : [:]
+            if let agentInfo = data["agentInfo"] { extra["agentInfo"] = agentInfo }
             messages = [
                 message(
-                    "Connected to a human agent.", role: .system,
-                    extra: ["sdkStringKey": "Connected to a human agent."])
+                    notice ?? "Connected to a human agent.", role: .system, extra: extra)
             ]
+        case "agent:joined", "agent:exited", "agent:notice":
+            if let notice = firstNonEmpty(["noticeText"]) {
+                messages = [message(notice, role: .system)]
+            }
         case "agent:disconnected":
             let close = text(["closeMessage", "message", "text", "body"])
             if !close.isEmpty { messages.append(message(close, suffix: ":close")) }
-            messages.append(
-                message(
-                    "The human agent has left the conversation.", role: .system, suffix: ":status",
-                    extra: ["sdkStringKey": "The human agent has left the conversation."]))
+            if let status = disconnectStatus(data) {
+                messages.append(
+                    message(status.text, role: .system, suffix: ":status",
+                        extra: ["sdkStringKey": status.stringKey]))
+            }
             if let survey = data["survey"] as? [String: Any],
                 let parsed = AgentTransferSurvey.parse(survey, wire: true)
             {
@@ -221,11 +310,14 @@ enum AgentTransfer {
                     Message(
                         id: "agent-transfer-survey-\(parsed.artemisSessionId)", role: .assistant,
                         content: parsed.prompt, timestamp: date,
-                        metadata: ["agentTransferSurvey": AnySendable(survey)], messageSource: source))
+                        metadata: ["agentTransferSurvey": AnySendable(survey)],
+                        messageSource: source.mapValues(AnySendable.init)))
             }
         default: break
         }
-        return Event(sessionId: session, type: type, timestamp: date, messages: messages)
+        return Event(
+            sessionId: session, type: type, timestamp: date, timestampText: timestampText,
+            deliveryId: firstNonEmpty(["deliveryId"]), data: data, messages: messages)
     }
     static func status(_ message: Message) -> AgentTransferStatus? {
         let custom = message.metadata?["custom"]?.value as? [String: Any] ?? [:]
@@ -237,7 +329,7 @@ enum AgentTransfer {
         }
         switch message.metadata?["agentTransferEventType"]?.value as? String {
         case "transfer_active", "agent:queued", "agent:waiting_message": return .queued
-        case "agent:connected", "agent:message", "agent:form", "agent.attachment": return .connected
+        case "agent:connected", "agent:message", "agent:form", "agent.attachment", "attachment": return .connected
         case "agent:disconnected": return .disconnected
         default: return nil
         }
