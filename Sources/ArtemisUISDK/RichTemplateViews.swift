@@ -29,10 +29,10 @@ struct RichContentTemplatesView: View {
                         content: markdown, linkColor: messageTextColor,
                         disabledNumbersHyperlink: chatTheme?.disabledNumbersHyperlink ?? false,
                         fillsAvailableWidth: fillsAvailableWidth)
-                } else if !isSuppressed(RichTemplateTypes.html), let html = richContent?.html?.templateTrimmed,
-                    !html.isEmpty
+                } else if !isSuppressed(RichTemplateTypes.html), let html = richContent?.html,
+                    !html.templateTrimmed.isEmpty
                 {
-                    HTMLRichTemplate(content: html, accentColor: context.accentColor)
+                    HTMLRichTemplate(content: html, isUserMessage: message.role == .user)
                 }
                 if !isSuppressed(RichTemplateTypes.image), let image = richContent?.image {
                     MediaImageTemplate(image: image, accentColor: context.accentColor)
@@ -52,7 +52,7 @@ struct RichContentTemplatesView: View {
                     ListRichTemplate(list: list, accentColor: context.accentColor)
                 }
                 if !isSuppressed(RichTemplateTypes.kpi), let kpi = richContent?.kpi {
-                    KPIRichTemplate(kpi: kpi, accentColor: context.accentColor)
+                    KPIRichTemplate(kpi: kpi)
                 }
                 if !isSuppressed(RichTemplateTypes.table), let table = richContent?.table {
                     TableRichTemplate(table: table, accentColor: context.accentColor)

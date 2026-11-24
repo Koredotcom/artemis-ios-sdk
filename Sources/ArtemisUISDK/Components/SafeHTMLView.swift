@@ -144,7 +144,9 @@ enum ChatHTMLSanitizer {
         )
         .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
     }
-    static func document(_ content: String, theme: ChatTheme?) -> String {
+    static func document(
+        _ content: String, theme: ChatTheme?, isUserMessage: Bool = false
+    ) -> String {
         func color(_ value: String?, _ fallback: String) -> String {
             guard let value,
                 value.range(of: #"^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$"#, options: .regularExpression)
@@ -152,6 +154,12 @@ enum ChatHTMLSanitizer {
             else { return fallback }
             return value
         }
+        let bubbleTextColor = isUserMessage ? theme?.userBubbleTextColor : theme?.assistantBubbleTextColor
+        let textColor = color(bubbleTextColor ?? theme?.textColor, isUserMessage ? "#FFFFFF" : "#1F2937")
+        let secondaryTextColor = color(theme?.mutedTextColor, "#6B7280")
+        let primaryColor = color(theme?.primaryColor, "#6366F1")
+        let borderColor = color(theme?.borderColor, "#E5E7EB")
+        let baseFontSize = min(24, max(10, theme?.baseFontSize ?? 14))
         let candidate = theme?.fontFamily ?? ""
         let font =
             candidate != "System"
@@ -160,8 +168,123 @@ enum ChatHTMLSanitizer {
         return """
             <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
             <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src https: http:; base-uri 'none'; form-action 'none'">
-            <style>body{display:flow-root;margin:0;font-family:\(font),sans-serif;font-size:\(theme?.baseFontSize ?? 16)px;color:\(color(theme?.textColor,"#1E293B"));overflow-wrap:anywhere}a{color:\(color(theme?.primaryColor,"#2563EB"))}img{max-width:100%;height:auto}pre{white-space:pre-wrap}table{border-collapse:collapse;width:100%}td,th{padding:6px;border:1px solid \(color(theme?.borderColor,"#64748B"))}blockquote{margin:8px 0;padding-left:12px;border-left:3px solid #64748B}</style>
-            </head><body>\(sanitize(content))</body></html>
+            <style>
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            body {
+              display: flow-root;
+              font-family: \(font), sans-serif;
+              font-size: \(baseFontSize)px;
+              line-height: 1.4;
+              color: \(textColor);
+              overflow-wrap: break-word;
+              word-break: break-word;
+              white-space: pre-wrap;
+            }
+            .rich-text {
+              box-sizing: border-box;
+              min-width: 0;
+              max-width: 100%;
+              word-wrap: break-word;
+              overflow-wrap: anywhere;
+              overflow: visible;
+            }
+            .rich-text h1, .rich-text h2, .rich-text h3,
+            .rich-text h4, .rich-text h5, .rich-text h6 {
+              margin: 8px 0 4px;
+              line-height: 1.3;
+            }
+            .rich-text h1 { font-size: 1.4em; }
+            .rich-text h2 { font-size: 1.25em; }
+            .rich-text h3 { font-size: 1.1em; }
+            .rich-text p { margin: 4px 0; }
+            .rich-text a {
+              color: \(primaryColor);
+              text-decoration: underline;
+            }
+            .rich-text code {
+              background: rgba(0,0,0,0.06);
+              padding: 1px 5px;
+              border-radius: 4px;
+              font-size: 0.9em;
+              font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+            }
+            .rich-text pre {
+              box-sizing: border-box;
+              max-width: 100%;
+              min-width: 0;
+              background: rgba(0,0,0,0.06);
+              padding: 10px 12px;
+              border-radius: 8px;
+              overflow: visible;
+              white-space: pre-wrap;
+              overflow-wrap: anywhere;
+              word-break: break-word;
+              margin: 8px 0;
+            }
+            .rich-text pre code {
+              background: none;
+              padding: 0;
+              white-space: inherit;
+              overflow-wrap: inherit;
+              word-break: inherit;
+            }
+            .rich-text ul, .rich-text ol {
+              box-sizing: border-box;
+              max-width: 100%;
+              margin: 6px 0;
+              margin-inline-start: 0.75em;
+              list-style-position: outside;
+            }
+            .rich-text li {
+              margin: 2px 0;
+              padding-inline-start: 0.15em;
+            }
+            .rich-text ul { padding-inline-start: 1.75em; }
+            .rich-text ol { padding-inline-start: 2em; }
+            .rich-text li > ul, .rich-text li > ol {
+              margin-top: 0.25em;
+              margin-bottom: 0;
+            }
+            .rich-text img {
+              max-width: 100%;
+              border-radius: 8px;
+              margin: 6px 0;
+            }
+            .rich-text hr {
+              border: none;
+              border-top: 1px solid \(borderColor);
+              margin: 8px 0;
+            }
+            .rich-text blockquote {
+              border-left: 3px solid \(primaryColor);
+              padding-left: 12px;
+              margin: 6px 0;
+              color: \(secondaryTextColor);
+            }
+            .rich-text table {
+              width: 100%;
+              min-width: 0;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin: 8px 0;
+              font-size: 0.95em;
+            }
+            .rich-text th, .rich-text td {
+              border: 1px solid \(borderColor);
+              padding: 8px 10px;
+              text-align: left;
+              vertical-align: top;
+              overflow-wrap: anywhere;
+              word-break: break-word;
+            }
+            .rich-text thead { background: rgba(0,0,0,0.04); }
+            .rich-text tbody tr:nth-child(even) { background: rgba(0,0,0,0.02); }
+            </style>
+            </head><body><div class="rich-text">\(sanitize(content))</div></body></html>
             """
     }
 }
@@ -174,12 +297,20 @@ enum ChatHTMLSanitizer {
 
 struct SafeHTMLView: View {
     let content: String
+    let isUserMessage: Bool
     @Environment(\.chatTheme) private var theme
     @Environment(\.openURL) private var openURL
     @State private var height: CGFloat = 100
+
+    init(content: String, isUserMessage: Bool = false) {
+        self.content = content
+        self.isUserMessage = isUserMessage
+    }
+
     var body: some View {
         HTMLWebView(
-            document: ChatHTMLSanitizer.document(content, theme: theme), height: $height,
+            document: ChatHTMLSanitizer.document(
+                content, theme: theme, isUserMessage: isUserMessage), height: $height,
             open: { openURL($0) }
         ).frame(height: height)
     }

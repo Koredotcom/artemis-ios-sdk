@@ -1,11 +1,10 @@
 import SwiftUI
 
 struct HTMLRichTemplate: View {
-    @Environment(\.chatStrings) private var strings
     let content: String
-    let accentColor: Color
+    let isUserMessage: Bool
 
     var body: some View {
-        SafeHTMLView(content: content).templateCard()
+        SafeHTMLView(content: content, isUserMessage: isUserMessage)
     }
 }
