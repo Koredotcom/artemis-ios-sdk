@@ -55,32 +55,31 @@ struct TypedFormInput: View {
     var onSubmit: () -> Void = {}
 
     var body: some View {
-        if inputType == "date" || inputType == "time" {
+        if inputType == "date" {
+            DateCalendarFormField(
+                label: label, placeholder: placeholder, value: $value, accentColor: accentColor)
+        } else if inputType == "time" {
             HStack(spacing: 8) {
                 if value.isEmpty {
                     Button {
-                        value = FormFieldValidation.formatter(type: inputType!, timeZone: timeZone)
+                        value = FormFieldValidation.formatter(type: "time", timeZone: timeZone)
                             .string(from: Date())
                     } label: {
                         HStack {
                             Text(placeholder ?? label)
                                 .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
                             Spacer(minLength: 0)
-                            Image(systemName: "calendar")
+                            Image(systemName: "clock")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
                         }
                     }
                     .buttonStyle(.plain)
                 } else {
-                    DatePicker(
-                        "", selection: date,
-                        displayedComponents: inputType == "date" ? [.date] : [.hourAndMinute])
-                    .labelsHidden()
+                    DatePicker("", selection: date, displayedComponents: [.hourAndMinute])
+                        .labelsHidden()
                     Spacer(minLength: 0)
-                    Button {
-                        value = ""
-                    } label: {
+                    Button { value = "" } label: {
                         Image(systemName: "xmark.circle")
                             .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
                     }
@@ -115,7 +114,67 @@ struct TypedFormInput: View {
 
     private var date: Binding<Date> {
         Binding(
-            get: { FormFieldValidation.parse(value, type: inputType!, timeZone: timeZone) ?? Date() },
-            set: { value = FormFieldValidation.formatter(type: inputType!, timeZone: timeZone).string(from: $0) })
+            get: { FormFieldValidation.parse(value, type: "time", timeZone: timeZone) ?? Date() },
+            set: { value = FormFieldValidation.formatter(type: "time", timeZone: timeZone).string(from: $0) })
+    }
+}
+
+private struct DateCalendarFormField: View {
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.chatTheme) private var theme
+
+    let label: String
+    let placeholder: String?
+    @Binding var value: String
+    let accentColor: Color
+    @State private var isPickerPresented = false
+    @State private var selectedDate = Date()
+
+    var body: some View {
+        Button {
+            selectedDate = FormFieldValidation.parse(value, type: "date", timeZone: timeZone) ?? Date()
+            isPickerPresented = true
+        } label: {
+            HStack(spacing: 8) {
+                Text(value.isEmpty ? (placeholder ?? label) : value)
+                    .foregroundStyle(value.isEmpty
+                        ? Color(hexString: theme?.mutedTextColor ?? "#64748B")
+                        : Color(hexString: theme?.textColor ?? "#1E293B"))
+                Spacer(minLength: 0)
+                Image(systemName: "calendar")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .richTemplateInput(accentColor: accentColor)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .popover(isPresented: $isPickerPresented, arrowEdge: .bottom) {
+            if #available(iOS 16.4, macOS 13.3, *) {
+                calendarPopup.presentationCompactAdaptation(.popover)
+            } else {
+                calendarPopup
+            }
+        }
+    }
+
+    private var calendarPopup: some View {
+        DatePicker(label, selection: dateSelection, displayedComponents: [.date])
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .padding(8)
+            .frame(width: 320)
+    }
+
+    private var dateSelection: Binding<Date> {
+        Binding(
+            get: { selectedDate },
+            set: {
+                selectedDate = $0
+                value = FormFieldValidation.formatter(type: "date", timeZone: timeZone).string(from: $0)
+                isPickerPresented = false
+            })
     }
 }

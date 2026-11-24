@@ -121,6 +121,7 @@ private struct RichTemplateInputModifier: ViewModifier {
             .foregroundStyle(Color(hexString: theme?.textColor ?? "#1E293B"))
             .padding(.horizontal, 12 * scale)
             .padding(.vertical, 8 * scale)
+            .frame(minHeight: 44 * scale)
             .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"), in: radius)
             .overlay(radius.stroke(
                 focused ? accentColor : Color(hexString: theme?.borderColor ?? "#E2E8F0"),
@@ -135,11 +136,16 @@ struct RichTemplateButtonStyle: ButtonStyle {
     let accentColor: Color
     let variant: Variant
     let minimumHeight: CGFloat?
+    let fontWeight: Font.Weight
 
-    init(accentColor: Color, variant: Variant, minimumHeight: CGFloat? = nil) {
+    init(
+        accentColor: Color, variant: Variant, minimumHeight: CGFloat? = nil,
+        fontWeight: Font.Weight = .regular
+    ) {
         self.accentColor = accentColor
         self.variant = variant
         self.minimumHeight = minimumHeight
+        self.fontWeight = fontWeight
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -152,7 +158,7 @@ struct RichTemplateButtonStyle: ButtonStyle {
         let isPressed = configuration.isPressed && isEnabled
         let shape = Capsule()
         return configuration.label
-            .font(theme?.font(size: 13) ?? .system(size: 13))
+            .font(theme?.font(size: 13, weight: fontWeight) ?? .system(size: 13, weight: fontWeight))
             .lineLimit(1)
             .padding(.horizontal, 14 * (theme?.spacingScale ?? 1))
             .padding(.vertical, 7 * (theme?.spacingScale ?? 1))

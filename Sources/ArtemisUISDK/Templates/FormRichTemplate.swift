@@ -23,7 +23,7 @@ struct FormRichTemplate: View {
         VStack(alignment: .leading, spacing: 12) {
             if let title = form.title, !title.templateTrimmed.isEmpty {
                 Text(title)
-                    .font(chatTheme?.font(size: 14, weight: .semibold) ?? .system(size: 14, weight: .semibold))
+                    .font(chatTheme?.font(size: 15, weight: .semibold) ?? .system(size: 15, weight: .semibold))
                     .foregroundStyle(templateStyle.text)
             }
             ForEach(form.fields) { field in
@@ -44,7 +44,7 @@ struct FormRichTemplate: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(field.label)
-                            .font(chatTheme?.font(size: 12, weight: .medium) ?? .system(size: 12, weight: .medium))
+                            .font(chatTheme?.font(size: 15, weight: .medium) ?? .system(size: 15, weight: .medium))
                             .foregroundStyle(templateStyle.mutedText)
                         if field.type == "select" {
                             Menu {
@@ -99,7 +99,8 @@ struct FormRichTemplate: View {
                 }
             }
             .buttonStyle(RichTemplateButtonStyle(
-                accentColor: context.accentColor, variant: .primary, minimumHeight: 44))
+                accentColor: context.accentColor, variant: .primary, minimumHeight: 44,
+                fontWeight: .semibold))
             .disabled(locked)
             if let error {
                 Text(strings(error))
