@@ -271,7 +271,7 @@ extension View {
                 cornerRadius: cornerRadius))
     }
     func templateTitle() -> some View {
-        modifier(TemplateTextModifier(size: 17, weight: .bold, muted: false))
+        modifier(TemplateTextModifier(size: 15, weight: .semibold, muted: false))
     }
     func templateBody() -> some View {
         modifier(TemplateTextModifier(size: 15, weight: .regular, muted: true))

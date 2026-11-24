@@ -201,6 +201,8 @@ public struct ChatTheme: Sendable {
     public let assistantBubbleColor: String
     public let assistantBubbleTextColor: String
     public let composeBarBackgroundColor: String
+    public let composeBarTextColor: String
+    public let composeBarPlaceholderColor: String
     public let borderColor: String
     public let borderRadius: Double
 
@@ -276,6 +278,8 @@ public struct ChatTheme: Sendable {
         assistantBubbleTextColor = pick(server?.assistantBubbleTextColor, textColor)
         composeBarBackgroundColor = pick(
             server?.composeBarBackgroundColor, dark ? "#1E293B" : "#FFFFFF")
+        composeBarTextColor = pick(server?.composeBarTextColor, textColor)
+        composeBarPlaceholderColor = pick(server?.composeBarPlaceholderColor, mutedTextColor)
         borderColor = pick(server?.borderColor, dark ? "#334155" : "#E2E8F0")
         borderRadius = min(48, max(0, Double(server?.borderRadius ?? Int(baseRadius))))
 

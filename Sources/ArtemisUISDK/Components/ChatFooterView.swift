@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 #if canImport(UIKit)
     import UIKit
@@ -18,61 +19,156 @@ struct ChatFooterView: View {
     var canAttach: Bool = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            Color(hexString: theme?.borderColor ?? "#E2E8F0").frame(height: 1)
-            HStack(alignment: .bottom, spacing: 8) {
-                if showAttachment {
-                    control("paperclip", label: "Add attachment", enabled: enabled && canAttach, action: onAttach)
-                }
-                ZStack(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text(placeholder).foregroundStyle(Color(hexString: theme?.mutedTextColor ?? "#64748B"))
-                            .padding(
-                                .horizontal, 14
-                            ).padding(.top, 10).allowsHitTesting(false)
-                    }
-                    #if canImport(UIKit)
-                        GrowingChatInput(
-                            text: $text, enabled: enabled, font: font,
-                            color: UIColor(Color(hexString: theme?.textColor)), onSend: onSend,
-                            accessibilityLabel: strings("Message"), fontSize: theme?.baseFontSize ?? 16
-                        )
-                        .frame(maxWidth: .infinity)
-                        .fixedSize(horizontal: false, vertical: true)
-                    #else
-                        TextEditor(text: $text).disabled(!enabled).frame(height: 60).opacity(
-                            text.isEmpty ? 0.5 : 1)
-                    #endif
-                }
-                .font(.system(size: 16))
-                .background(Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20).stroke(
-                        Color(hexString: theme?.borderColor ?? "#E2E8F0"))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                control("paperplane", label: "Send message", enabled: canSend, action: onSend)
+        HStack(alignment: .center, spacing: 8) {
+            if showAttachment {
+                control(
+                    "paperclip", label: "Add attachment", enabled: enabled && canAttach,
+                    action: onAttach)
             }
-            .padding(.horizontal, 12 * (theme?.spacingScale ?? 1)).padding(
-                .vertical, 5 * (theme?.spacingScale ?? 1))
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .font(composerFont)
+                        .foregroundStyle(placeholderColor)
+                        .padding(.leading, 0)
+                        .allowsHitTesting(false)
+                }
+                #if canImport(UIKit)
+                    GrowingChatInput(
+                        text: $text, enabled: enabled, font: font ?? theme?.fontFamily,
+                        color: UIColor(composerTextColor),
+                        onSend: onSend,
+                        accessibilityLabel: strings("Message"), fontSize: theme?.baseFontSize ?? 16
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 30)
+                    .fixedSize(horizontal: false, vertical: true)
+                #else
+                    TextEditor(text: $text)
+                        .disabled(!enabled)
+                        .font(composerFont)
+                        .frame(height: 40)
+                #endif
+            }
+            .frame(maxWidth: .infinity)
+            control("paperplane", label: "Send message", enabled: canSend, action: onSend)
         }
+        .padding(.horizontal, composerPaddingX)
+        .padding(.vertical, composerPaddingY)
+        .background(Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"))
+        .overlay(
+            RoundedRectangle(cornerRadius: composerRadius)
+                .stroke(Color(hexString: theme?.borderColor ?? "#E2E8F0"), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: composerRadius))
+        .padding(.horizontal, composerMargin)
+        .padding(.vertical, 5)
         .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"))
     }
+
     private func control(_ icon: String, label: String, enabled: Bool, action: @escaping () -> Void)
         -> some View
     {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 18)).frame(width: 40, height: 40)
-                .foregroundStyle(Color(hexString: theme?.primaryColor ?? "#2563EB"))
+        let isAttachment = icon == "paperclip"
+        let iconColor = isAttachment ? attachmentIconColor : sendButtonForeground
+        let buttonBackground = isAttachment ? Color.clear : sendButtonBackground
+        let iconSize: CGFloat = isAttachment ? 16 : 14
+        return Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: iconSize))
+                .frame(width: 30, height: 30)
+                .foregroundStyle(iconColor)
                 .background(
-                    Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"),
-                    in: RoundedRectangle(cornerRadius: 12)
+                    buttonBackground,
+                    in: RoundedRectangle(cornerRadius: sendButtonRadius)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12).stroke(
-                        Color(hexString: theme?.borderColor ?? "#E2E8F0")))
-        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4).accessibilityLabel(
-            strings(label))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .accessibilityLabel(strings(label))
+        .fixedSize()
+    }
+
+    private var composerFont: Font {
+        if let font, !font.isEmpty {
+            return .custom(font, size: theme?.baseFontSize ?? 16)
+        }
+        return theme?.font() ?? .system(size: 16)
+    }
+
+    private var composerTextColor: Color {
+        Color(hexString: theme?.composeBarTextColor ?? theme?.textColor ?? "#1F2937")
+    }
+
+    private var placeholderColor: Color {
+        Color(hexString: theme?.composeBarPlaceholderColor ?? theme?.mutedTextColor ?? "#6B7280")
+    }
+
+    private var attachmentIconColor: Color {
+        Color(hexString: theme?.mutedTextColor ?? "#6B7280")
+    }
+
+    private var composerMargin: CGFloat {
+        switch theme?.density {
+        case "compact": return 14
+        case "spacious": return 18
+        default: return 16
+        }
+    }
+
+    private var composerPaddingX: CGFloat {
+        switch theme?.density {
+        case "compact": return 14
+        case "spacious": return 18
+        default: return 16
+        }
+    }
+
+    private var composerPaddingY: CGFloat {
+        switch theme?.density {
+        case "compact": return 8
+        case "spacious": return 13
+        default: return 10
+        }
+    }
+
+    private var baseBorderRadius: CGFloat {
+        min(40, max(0, CGFloat(theme?.borderRadius ?? 16)))
+    }
+
+    private var composerRadius: CGFloat { baseBorderRadius + 6 }
+    private var sendButtonRadius: CGFloat { max(8, baseBorderRadius) }
+
+    private var sendButtonBackground: Color {
+        Color(hexString: theme?.headerBackgroundColor ?? theme?.primaryColor ?? "#0066FF")
+    }
+
+    private var sendButtonForeground: Color {
+        readableTextColor(on: theme?.headerBackgroundColor ?? theme?.primaryColor ?? "#0066FF")
+    }
+
+    private func readableTextColor(on background: String) -> Color {
+        let hex = background.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        guard hex.count == 3 || hex.count == 6 else { return .white }
+        let normalizedHex: String
+        if hex.count == 3 {
+            normalizedHex = hex.map { "\($0)\($0)" }.joined()
+        } else {
+            normalizedHex = hex
+        }
+        guard let value = UInt64(normalizedHex, radix: 16) else {
+            return .white
+        }
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+        func linear(_ component: Double) -> Double {
+            component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        let darkContrast = (luminance + 0.05) / (0.005 + 0.05)
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return darkContrast >= whiteContrast ? Color(hexString: "#111827") : .white
     }
 }
 
@@ -90,7 +186,8 @@ struct ChatFooterView: View {
             let view = ComposerTextView()
             view.backgroundColor = .clear
             view.delegate = context.coordinator
-            view.textContainerInset = UIEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
+            view.textContainerInset = UIEdgeInsets(top: 5, left: 0, bottom: 5, right: 0)
+            view.textContainer.lineFragmentPadding = 0
             view.returnKeyType = .send
             view.accessibilityLabel = accessibilityLabel
             view.isScrollEnabled = true
@@ -165,7 +262,7 @@ struct ChatFooterView: View {
             return min(
                 120,
                 max(
-                    40,
+                    30,
                     ceil(super.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)))
         }
         override var intrinsicContentSize: CGSize {
