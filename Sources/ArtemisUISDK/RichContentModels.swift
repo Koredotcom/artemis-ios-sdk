@@ -120,6 +120,13 @@ public struct FormTemplate: Sendable {
     public let submitLabel: String?
 }
 
+public struct FeedbackFollowUp: Sendable {
+    public let enabled: Bool
+    public let answerType: String
+    public let ratingType: String?
+    public let questions: [String: String]
+}
+
 public struct ProgressTemplate: Sendable {
     public let label: String?
     public let value: Double
@@ -131,6 +138,17 @@ public struct FeedbackTemplate: Sendable {
     public let prompt: String
     public let type: String
     public let max: Int
+    public let ratingDisplay: String?
+    public let submitLabel: String?
+    public let pendingMessage: String?
+    public let successMessage: String?
+    public let errorMessage: String?
+    public let commentThreshold: Int?
+    public let commentVisibility: String?
+    public let commentRatings: [Int]
+    public let commentPrompt: String?
+    public let commentPlaceholder: String?
+    public let followUp: FeedbackFollowUp?
 }
 
 public struct ActionOption: Sendable, Identifiable {
@@ -281,7 +299,7 @@ enum RichContentParser {
                     value: string(item["value"] ?? item["payload"] ?? item["url"]),
                     description: string(item["description"]),
                     options: parseOptions(item["options"]),
-                    inputType: string(item["input_type"]),
+                    inputType: string(item["input_type"]) ?? string(item["inputType"]),
                     placeholder: string(item["placeholder"]),
                     required: bool(item["required"]) ?? false
                 )
@@ -404,14 +422,16 @@ enum RichContentParser {
                     options: parseOptions(item["options"]).map {
                         FormFieldOption(id: $0.id, label: $0.label, description: $0.description)
                     },
-                    inputType: string(item["input_type"]),
+                    inputType: string(item["input_type"]) ?? string(item["inputType"]),
                     placeholder: string(item["placeholder"]),
                     required: bool(item["required"]) ?? false
                 )
             } ?? []
         return fields.isEmpty
             ? nil
-            : FormTemplate(title: string(json["title"]), fields: fields, submitLabel: string(json["submit_label"]))
+            : FormTemplate(
+                title: string(json["title"]), fields: fields,
+                submitLabel: string(json["submit_label"]) ?? string(json["submitLabel"]))
     }
 
     private static func parseProgress(_ json: [String: Any]) -> ProgressTemplate {
@@ -422,7 +442,32 @@ enum RichContentParser {
 
     private static func parseFeedback(_ json: [String: Any]) -> FeedbackTemplate? {
         guard let prompt = string(json["prompt"]), !prompt.trimmed.isEmpty else { return nil }
-        return FeedbackTemplate(prompt: prompt, type: string(json["type"]) ?? "stars", max: int(json["max"]) ?? 5)
+        let rawFollowUp = dictionary(json["follow_up"]) ?? dictionary(json["followUp"])
+        let followUp = rawFollowUp.map { value in
+            let questions = dictionary(value["questions"])?.reduce(into: [String: String]()) { result, pair in
+                result[pair.key] = displayString(pair.value)
+            } ?? [:]
+            return FeedbackFollowUp(
+                enabled: bool(value["enabled"]) ?? false,
+                answerType: string(value["answer_type"]) ?? string(value["answerType"]) ?? "text",
+                ratingType: string(value["rating_type"]) ?? string(value["ratingType"]),
+                questions: questions)
+        }
+        let commentRatings = (array(json["comment_ratings"]) ?? array(json["commentRatings"]) ?? [])
+            .compactMap(int)
+        return FeedbackTemplate(
+            prompt: prompt, type: string(json["type"]) ?? "stars", max: int(json["max"]) ?? 5,
+            ratingDisplay: string(json["rating_display"]) ?? string(json["ratingDisplay"]),
+            submitLabel: string(json["submit_label"]) ?? string(json["submitLabel"]),
+            pendingMessage: string(json["pending_message"]) ?? string(json["pendingMessage"]),
+            successMessage: string(json["success_message"]) ?? string(json["successMessage"]),
+            errorMessage: string(json["error_message"]) ?? string(json["errorMessage"]),
+            commentThreshold: int(json["comment_threshold"]) ?? int(json["commentThreshold"]),
+            commentVisibility: string(json["comment_visibility"]) ?? string(json["commentVisibility"]),
+            commentRatings: commentRatings,
+            commentPrompt: string(json["comment_prompt"]) ?? string(json["commentPrompt"]),
+            commentPlaceholder: string(json["comment_placeholder"]) ?? string(json["commentPlaceholder"]),
+            followUp: followUp)
     }
 
     private static func parseOptions(_ raw: Any?) -> [ActionOption] {

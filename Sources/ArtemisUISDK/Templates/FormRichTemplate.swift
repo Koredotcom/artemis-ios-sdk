@@ -7,8 +7,9 @@ import SwiftUI
 
 struct FormRichTemplate: View {
     @Environment(\.chatTheme) private var chatTheme
-    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
     @Environment(\.chatStrings) private var strings
+    private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+
     let form: FormTemplate
     let messageId: String
     let context: RichTemplateContext
@@ -19,29 +20,66 @@ struct FormRichTemplate: View {
     @State private var showErrors = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             if let title = form.title, !title.templateTrimmed.isEmpty {
-                Text(title).templateTitle()
+                Text(title)
+                    .font(chatTheme?.font(size: 14, weight: .semibold) ?? .system(size: 14, weight: .semibold))
+                    .foregroundStyle(templateStyle.text)
             }
             ForEach(form.fields) { field in
-                if field.type == "button" {
+                if field.type != "input" && field.type != "select" {
                     Button(field.label) {
                         pending = true
                         Task {
                             defer { pending = false }
                             do {
-                                try await context.perform(field.id, value: field.value, renderId: messageId)
+                                try await context.perform(
+                                    field.id, value: field.value ?? field.id, renderId: messageId)
                                 submitted = true
                             } catch { self.error = strings("Form could not be sent. Please retry.") }
                         }
-                    }.disabled(locked)
+                    }
+                    .buttonStyle(RichTemplateButtonStyle(accentColor: context.accentColor, variant: .outline))
+                    .disabled(locked)
                 } else {
-                    FieldView(
-                        field: field, value: binding(for: field), accentColor: context.accentColor,
-                        submitted: locked)
-                    if let error = validationErrors[field.id], showErrors || !(values[field.id] ?? "").isEmpty {
-                        Text(strings(error)).font(.caption).foregroundStyle(.red).accessibilityLabel(
-                            field.label + ": " + strings(error))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(field.label)
+                            .font(chatTheme?.font(size: 12, weight: .medium) ?? .system(size: 12, weight: .medium))
+                            .foregroundStyle(templateStyle.mutedText)
+                        if field.type == "select" {
+                            Menu {
+                                ForEach(field.options) { option in
+                                    Button(option.label) { values[field.id] = option.id }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(selectedLabel(for: field))
+                                        .foregroundStyle((values[field.id] ?? "").isEmpty
+                                            ? templateStyle.mutedText : templateStyle.text)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(templateStyle.mutedText)
+                                }
+                                .richTemplateInput(accentColor: context.accentColor)
+                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .disabled(locked || field.options.isEmpty)
+                        } else {
+                            TypedFormInput(
+                                label: field.label, placeholder: field.placeholder,
+                                inputType: field.inputType, value: binding(for: field),
+                                accentColor: context.accentColor)
+                            .disabled(locked)
+                        }
+                        if let validationError = validationErrors[field.id],
+                            showErrors || !(values[field.id] ?? "").isEmpty
+                        {
+                            Text(strings(validationError))
+                                .font(chatTheme?.font(size: 12) ?? .system(size: 12))
+                                .foregroundStyle(.red)
+                                .accessibilityLabel(field.label + ": " + strings(validationError))
+                        }
                     }
                 }
             }
@@ -55,17 +93,22 @@ struct FormRichTemplate: View {
                     do {
                         try await context.perform(
                             "form-submit", value: encodeFormSubmitPayload(resolvedValues),
-                            formData: resolvedValues,
-                            renderId: messageId)
+                            formData: resolvedValues, renderId: messageId)
                         submitted = true
                     } catch { self.error = strings("Form could not be sent. Please retry.") }
                 }
             }
-            .buttonStyle(FilledCapsuleButtonStyle(accentColor: context.accentColor))
+            .buttonStyle(RichTemplateButtonStyle(
+                accentColor: context.accentColor, variant: .primary, minimumHeight: 44))
             .disabled(locked)
-            if let error { Text(strings(error)).font(.caption).foregroundStyle(.red) }
+            if let error {
+                Text(strings(error))
+                    .font(chatTheme?.font(size: 12) ?? .system(size: 12))
+                    .foregroundStyle(.red)
+            }
         }
-        .templateCard(padding: 18)
+        .richTemplateCard()
+        .padding(.top, 8)
         .onAppear {
             if values.isEmpty { values = context.presentation?.values(for: messageId) ?? [:] }
             for field in form.fields where values[field.id] == nil {
@@ -77,20 +120,21 @@ struct FormRichTemplate: View {
 
     private var resolvedValues: [String: String] {
         Dictionary(
-            form.fields.filter { $0.type != "button" }.map { ($0.id, values[$0.id] ?? $0.value ?? "") },
+            form.fields.filter { $0.type == "input" || $0.type == "select" }
+                .map { ($0.id, values[$0.id] ?? $0.value ?? "") },
             uniquingKeysWith: { _, last in last })
     }
 
     private var locked: Bool { submitted || pending || context.submittedActionId != nil }
+
     private var validationErrors: [String: String] {
         Dictionary(
-            form.fields.filter { $0.type != "button" }.compactMap { field in
+            form.fields.filter { $0.type == "input" || $0.type == "select" }.compactMap { field in
                 FormFieldValidation.error(
                     value: resolvedValues[field.id] ?? "", required: field.required,
                     inputType: field.inputType,
                     allowedOptions: field.type == "select" ? field.options.map(\.id) : nil
-                )
-                .map { (field.id, $0) }
+                ).map { (field.id, $0) }
             }, uniquingKeysWith: { _, last in last })
     }
 
@@ -98,51 +142,9 @@ struct FormRichTemplate: View {
         Binding(get: { values[field.id] ?? field.value ?? "" }, set: { values[field.id] = $0 })
     }
 
-    private struct FieldView: View {
-        @Environment(\.chatTheme) private var chatTheme
-        private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
-        @Environment(\.chatStrings) private var strings
-        let field: FormTemplateField
-        @Binding var value: String
-        let accentColor: Color
-        let submitted: Bool
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                if field.type == "select", !field.options.isEmpty {
-                    Menu {
-                        ForEach(field.options) { option in
-                            Button(option.label) { value = option.id }
-                        }
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                if !value.isEmpty {
-                                    Text(field.label + (field.required ? " *" : "")).font(.caption2.weight(.semibold))
-                                        .foregroundStyle(templateStyle.mutedText)
-                                }
-                                Text(selectedLabel)
-                                    .foregroundStyle(value.isEmpty ? templateStyle.mutedText : templateStyle.text)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.down").foregroundStyle(templateStyle.mutedText)
-                        }
-                        .templateInputBorder(accentColor: accentColor, focused: !value.isEmpty)
-                    }
-                    .disabled(submitted)
-                } else {
-                    TypedFormInput(
-                        label: field.label, placeholder: field.placeholder, inputType: field.inputType,
-                        value: $value, accentColor: accentColor
-                    ).disabled(submitted)
-                }
-            }
-        }
-
-        private var selectedLabel: String {
-            field.options.first { $0.id == value }?.label ?? field.placeholder ?? field.label
-        }
-
+    private func selectedLabel(for field: FormTemplateField) -> String {
+        field.options.first { $0.id == (values[field.id] ?? "") }?.label
+            ?? field.placeholder ?? (field.label.isEmpty ? strings("Select...") : field.label)
     }
 }
 

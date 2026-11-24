@@ -248,6 +248,8 @@ public final class AgentSDK {
         ratingValue: Int,
         feedbackText: String? = nil,
         actionRenderId: String? = nil,
+        followUpRating: Int? = nil,
+        followUpText: String? = nil,
         timeout: TimeInterval = 10
     ) async throws -> String {
         guard isConnected() else {
@@ -263,6 +265,8 @@ public final class AgentSDK {
                 ratingValue: ratingValue,
                 feedbackText: feedbackText,
                 actionRenderId: actionRenderId,
+                followUpRating: followUpRating,
+                followUpText: followUpText,
                 timeout: timeout
             )
         } catch {

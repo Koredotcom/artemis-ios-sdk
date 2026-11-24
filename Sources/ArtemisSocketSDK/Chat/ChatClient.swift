@@ -173,7 +173,8 @@ extension ChatClientDelegate {
 
     func submitFeedback(
         messageId: String, ratingType: String, ratingValue: Int, feedbackText: String? = nil,
-        actionRenderId: String? = nil, timeout: TimeInterval = 10
+        actionRenderId: String? = nil, followUpRating: Int? = nil, followUpText: String? = nil,
+        timeout: TimeInterval = 10
     ) async throws -> String {
         guard sessionManager.isConnected() else { throw ChatClientError.notConnected }
         guard !messageId.isEmpty else { throw ChatClientError.emptyMessageId }
@@ -184,7 +185,8 @@ extension ChatClientDelegate {
             frame: .feedbackSubmit(
                 messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
                 feedbackText: feedbackText,
-                actionRenderId: actionRenderId))
+                actionRenderId: actionRenderId, followUpRating: followUpRating,
+                followUpText: followUpText))
     }
     func submitAgentTransferSurvey(_ survey: AgentTransferSurvey, score: Int, comments: String?)
         async throws -> String

@@ -123,6 +123,8 @@ public struct RichTemplateContext {
             Void
     public let performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)?
     public let sendFeedback: ((String, String, Int, String?) async throws -> Void)?
+    public let sendRichFeedback:
+        ((String, String, Int, String?, Int?, String?) async throws -> Void)?
     public let presentation: ChatPresentationState?
     public let submitFeedback:
         (_ messageId: String, _ ratingType: String, _ ratingValue: Int, _ actionRenderId: String?) ->
@@ -134,6 +136,7 @@ public struct RichTemplateContext {
         performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)? =
             nil,
         sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil,
+        sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil,
         presentation: ChatPresentationState? = nil
     ) {
         self.message = message
@@ -143,6 +146,7 @@ public struct RichTemplateContext {
         self.submitFeedback = submitFeedback
         self.performAction = performAction
         self.sendFeedback = sendFeedback
+        self.sendRichFeedback = sendRichFeedback
         self.presentation = presentation
     }
 }
@@ -1022,14 +1026,16 @@ public enum AgentChatUI {
             messageId: messageId, ratingType: "thumbs", ratingValue: rating, feedbackText: comment)
     }
     public func sendFeedback(
-        _ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String?
+        _ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String?,
+        feedbackText: String? = nil, followUpRating: Int? = nil, followUpText: String? = nil
     )
         async throws
     {
         guard let sdk else { throw AgentSDKError.notConnected }
         _ = try await sdk.submitFeedback(
             messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
-            actionRenderId: actionRenderId)
+            feedbackText: feedbackText, actionRenderId: actionRenderId,
+            followUpRating: followUpRating, followUpText: followUpText)
     }
     func surveyPresentation(for message: Message) -> SurveyPresentation {
         if let existing = surveys[message.id] { return existing }

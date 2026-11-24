@@ -22,7 +22,9 @@ enum TransportClientMessage {
         ratingType: String,
         ratingValue: Int,
         feedbackText: String?,
-        actionRenderId: String?
+        actionRenderId: String?,
+        followUpRating: Int?,
+        followUpText: String?
     )
 
     func toJSON() throws -> String {
@@ -60,7 +62,9 @@ enum TransportClientMessage {
             if let renderId { dict["renderId"] = renderId }
             return dict
 
-        case .feedbackSubmit(let messageId, let ratingType, let ratingValue, let feedbackText, let actionRenderId):
+        case .feedbackSubmit(
+            let messageId, let ratingType, let ratingValue, let feedbackText, let actionRenderId,
+            let followUpRating, let followUpText):
             var dict: [String: Any] = [
                 "type": "feedback.submit",
                 "messageId": messageId,
@@ -69,6 +73,8 @@ enum TransportClientMessage {
             ]
             if let feedbackText { dict["feedbackText"] = feedbackText }
             if let actionRenderId { dict["actionRenderId"] = actionRenderId }
+            if let followUpRating { dict["followUpRating"] = followUpRating }
+            if let followUpText { dict["followUpText"] = followUpText }
             return dict
         }
     }

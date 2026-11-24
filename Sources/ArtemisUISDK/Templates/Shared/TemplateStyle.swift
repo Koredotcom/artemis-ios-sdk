@@ -92,6 +92,90 @@ struct TemplateControlButtonStyle: ButtonStyle {
     }
 }
 
+/// Card and control measurements used by the Web SDK form and feedback renderers.
+private struct RichTemplateCardModifier: ViewModifier {
+    @Environment(\.chatTheme) private var theme
+    func body(content: Content) -> some View {
+        let scale = theme?.spacingScale ?? 1
+        let background = Color(hexString: theme?.backgroundColor ?? "#FFFFFF")
+        let secondary = Color(hexString: theme?.surfaceColor ?? "#F8FAFC")
+        let border = Color(hexString: theme?.borderColor ?? "#E2E8F0")
+        return content
+            .padding(16 * scale)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(background.overlay(secondary.opacity(0.08)))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(border, lineWidth: 1))
+    }
+}
+
+private struct RichTemplateInputModifier: ViewModifier {
+    @Environment(\.chatTheme) private var theme
+    let accentColor: Color
+    let focused: Bool
+    func body(content: Content) -> some View {
+        let scale = theme?.spacingScale ?? 1
+        let radius = RoundedRectangle(cornerRadius: 8)
+        return content
+            .font(theme?.font(size: 13) ?? .system(size: 13))
+            .foregroundStyle(Color(hexString: theme?.textColor ?? "#1E293B"))
+            .padding(.horizontal, 12 * scale)
+            .padding(.vertical, 8 * scale)
+            .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"), in: radius)
+            .overlay(radius.stroke(
+                focused ? accentColor : Color(hexString: theme?.borderColor ?? "#E2E8F0"),
+                lineWidth: 1))
+    }
+}
+
+struct RichTemplateButtonStyle: ButtonStyle {
+    enum Variant { case outline, primary }
+    @Environment(\.chatTheme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+    let accentColor: Color
+    let variant: Variant
+    let minimumHeight: CGFloat?
+
+    init(accentColor: Color, variant: Variant, minimumHeight: CGFloat? = nil) {
+        self.accentColor = accentColor
+        self.variant = variant
+        self.minimumHeight = minimumHeight
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        let palette = TemplatePalette(theme: theme)
+        let isPrimary: Bool
+        switch variant {
+        case .outline: isPrimary = false
+        case .primary: isPrimary = true
+        }
+        let isPressed = configuration.isPressed && isEnabled
+        let shape = Capsule()
+        return configuration.label
+            .font(theme?.font(size: 13) ?? .system(size: 13))
+            .lineLimit(1)
+            .padding(.horizontal, 14 * (theme?.spacingScale ?? 1))
+            .padding(.vertical, 7 * (theme?.spacingScale ?? 1))
+            .frame(minHeight: (minimumHeight ?? 0) * (theme?.spacingScale ?? 1))
+            .foregroundStyle(
+                isPrimary
+                    ? (isEnabled ? Color.white : palette.text.opacity(0.72))
+                    : (isPressed ? Color.white : accentColor))
+            .background {
+                if isPrimary {
+                    isEnabled ? accentColor : palette.text.opacity(0.18)
+                } else if isPressed {
+                    accentColor
+                } else {
+                    Color.clear
+                }
+            }
+            .overlay(shape.stroke(accentColor, lineWidth: 1))
+            .clipShape(shape)
+            .opacity(isPrimary && !isEnabled ? 1 : isEnabled ? 1 : 0.5)
+    }
+}
+
 /// Content-sized wrapping rows, including a measured fallback for iOS 15/macOS 12.
 struct TemplateFlowRow<Item: Identifiable, Content: View>: View {
     let items: [Item]
@@ -261,6 +345,10 @@ private struct TemplateTextModifier: ViewModifier {
     }
 }
 extension View {
+    func richTemplateCard() -> some View { modifier(RichTemplateCardModifier()) }
+    func richTemplateInput(accentColor: Color, focused: Bool = false) -> some View {
+        modifier(RichTemplateInputModifier(accentColor: accentColor, focused: focused))
+    }
     func templateCard(
         padding: CGFloat = 14, backgroundColor: Color? = nil, borderColor: Color? = nil,
         cornerRadius: CGFloat? = nil

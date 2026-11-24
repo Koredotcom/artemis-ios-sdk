@@ -186,6 +186,11 @@ public struct AgentChatView: View {
                                 try await model.sendFeedback(
                                     $0, ratingType: $1, ratingValue: $2, actionRenderId: $3)
                             },
+                            sendRichFeedback: {
+                                try await model.sendFeedback(
+                                    $0, ratingType: $1, ratingValue: $2, actionRenderId: $0,
+                                    feedbackText: $3, followUpRating: $4, followUpText: $5)
+                            },
                             presentation: model.presentation, showCitations: model.citationsEnabled,
                             showAgentLinks: model.contactCenterEnabled,
                             showAnsweredByAI: model.showAnsweredByAI,
@@ -544,6 +549,7 @@ struct MessageBubble: View {
     let resolveAttachment: (ChatAttachment) async -> URL?
     var performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)? = nil
     var sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil
+    var sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil
     var presentation: ChatPresentationState? = nil
     var showCitations = true
     var showAgentLinks = false
@@ -758,7 +764,7 @@ struct MessageBubble: View {
         RichTemplateContext(
             message: message, theme: theme, accentColor: Color(hexString: theme?.primaryColor),
             submitAction: onSubmitAction, submitFeedback: onSubmitFeedback, performAction: performAction,
-            sendFeedback: sendFeedback, presentation: presentation)
+            sendFeedback: sendFeedback, sendRichFeedback: sendRichFeedback, presentation: presentation)
     }
 }
 
