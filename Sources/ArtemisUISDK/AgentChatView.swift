@@ -115,7 +115,7 @@ public struct AgentChatView: View {
             .overlay(alignment: .center) { closeOrMinimizePopupOverlay }
             .animation(.easeOut(duration: 0.2), value: isCloseOrMinimizePopupPresented)
             #if os(iOS)
-                .sheet(item: $safariPresentation) { presentation in
+                .fullScreenCover(item: $safariPresentation) { presentation in
                     ChatSafariViewController(url: presentation.url)
                 }
             #endif
@@ -271,7 +271,7 @@ public struct AgentChatView: View {
             }
         }
         #if os(iOS)
-            .sheet(isPresented: $showPhotoPicker) {
+            .fullScreenCover(isPresented: $showPhotoPicker) {
                 AttachmentPhotoPicker { urls, error in
                     showPhotoPicker = false
                     if let error { model.errorMessage = error }
@@ -279,7 +279,7 @@ public struct AgentChatView: View {
                 }
             }
             #if os(iOS)
-                .sheet(isPresented: $showCameraPicker) {
+                .fullScreenCover(isPresented: $showCameraPicker) {
                     AttachmentCameraPicker { url, error in
                         showCameraPicker = false
                         if let error {

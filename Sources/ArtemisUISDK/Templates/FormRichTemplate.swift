@@ -9,6 +9,7 @@ struct FormRichTemplate: View {
     @Environment(\.chatTheme) private var chatTheme
     @Environment(\.chatStrings) private var strings
     private var templateStyle: TemplatePalette { TemplatePalette(theme: chatTheme) }
+    private var actionRenderId: String? { context.message.actions?.renderId }
 
     let form: FormTemplate
     let messageId: String
@@ -34,7 +35,7 @@ struct FormRichTemplate: View {
                             defer { pending = false }
                             do {
                                 try await context.perform(
-                                    field.id, value: field.value ?? field.id, renderId: messageId)
+                                    field.id, value: field.value ?? field.id, renderId: actionRenderId)
                                 submitted = true
                             } catch { self.error = strings("Form could not be sent. Please retry.") }
                         }
@@ -83,7 +84,8 @@ struct FormRichTemplate: View {
                     }
                 }
             }
-            Button(form.submitLabel ?? strings("Submit")) {
+            Button {
+                guard !locked else { return }
                 showErrors = true
                 guard validationErrors.isEmpty else { return }
                 pending = true
@@ -92,10 +94,16 @@ struct FormRichTemplate: View {
                     defer { pending = false }
                     do {
                         try await context.perform(
-                            "form-submit", value: encodeFormSubmitPayload(resolvedValues),
-                            formData: resolvedValues, renderId: messageId)
+                            "form-submit",
+                            value: encodeFormSubmitPayload(fields: form.fields, values: resolvedValues),
+                            formData: resolvedValues, renderId: actionRenderId)
                         submitted = true
                     } catch { self.error = strings("Form could not be sent. Please retry.") }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if pending { ProgressView().controlSize(.small).tint(.white) }
+                    Text(form.submitLabel ?? strings("Submit"))
                 }
             }
             .buttonStyle(RichTemplateButtonStyle(
@@ -113,7 +121,7 @@ struct FormRichTemplate: View {
         .onAppear {
             if values.isEmpty { values = context.presentation?.values(for: messageId) ?? [:] }
             for field in form.fields where values[field.id] == nil {
-                values[field.id] = field.value ?? ""
+                values[field.id] = ""
             }
         }
         .onChange(of: values) { context.presentation?.save($0, for: messageId) }
@@ -122,11 +130,14 @@ struct FormRichTemplate: View {
     private var resolvedValues: [String: String] {
         Dictionary(
             form.fields.filter { $0.type == "input" || $0.type == "select" }
-                .map { ($0.id, values[$0.id] ?? $0.value ?? "") },
+                .map { ($0.id, values[$0.id] ?? "") },
             uniquingKeysWith: { _, last in last })
     }
 
-    private var locked: Bool { submitted || pending || context.submittedActionId != nil }
+    private var locked: Bool {
+        submitted || pending || context.submittedActionId != nil
+            || !context.submittedActionIds.isEmpty
+    }
 
     private var validationErrors: [String: String] {
         Dictionary(
@@ -140,7 +151,7 @@ struct FormRichTemplate: View {
     }
 
     private func binding(for field: FormTemplateField) -> Binding<String> {
-        Binding(get: { values[field.id] ?? field.value ?? "" }, set: { values[field.id] = $0 })
+        Binding(get: { values[field.id] ?? "" }, set: { values[field.id] = $0 })
     }
 
     private func selectedLabel(for field: FormTemplateField) -> String {
@@ -149,12 +160,49 @@ struct FormRichTemplate: View {
     }
 }
 
-private func encodeFormSubmitPayload(_ values: [String: String]) -> String {
-    guard JSONSerialization.isValidJSONObject(values),
-        let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
-        let encoded = String(data: data, encoding: .utf8)
-    else {
-        return "{}"
+private func encodeFormSubmitPayload(
+    fields: [FormTemplateField], values: [String: String]
+) -> String {
+    // Web's JSON.stringify preserves control order for string keys, while
+    // JavaScript enumerates canonical integer-like keys first in numeric order.
+    var fieldOrder: [String] = []
+    var orderedValues: [String: String] = [:]
+    for field in fields where field.type == "input" || field.type == "select" {
+        if orderedValues[field.id] == nil { fieldOrder.append(field.id) }
+        orderedValues[field.id] = values[field.id] ?? ""
     }
+
+    let integerKeys = fieldOrder.compactMap { fieldId -> (String, UInt32)? in
+        guard let index = UInt32(fieldId), index < UInt32.max, String(index) == fieldId else {
+            return nil
+        }
+        return (fieldId, index)
+    }.sorted { $0.1 < $1.1 }.map { $0.0 }
+    let stringKeys = fieldOrder.filter { fieldId in
+        !(UInt32(fieldId).map { $0 < UInt32.max && String($0) == fieldId } ?? false)
+    }
+
+    let pairs = (integerKeys + stringKeys).map { fieldId in
+        "\(jsonStringLiteral(fieldId)):\(jsonStringLiteral(orderedValues[fieldId] ?? ""))"
+    }
+    return "{\(pairs.joined(separator: ","))}"
+}
+
+private func jsonStringLiteral(_ value: String) -> String {
+    var encoded = "\""
+    for scalar in value.unicodeScalars {
+        switch scalar.value {
+        case 0x22: encoded += "\\\""
+        case 0x5C: encoded += "\\\\"
+        case 0x08: encoded += "\\b"
+        case 0x0C: encoded += "\\f"
+        case 0x0A: encoded += "\\n"
+        case 0x0D: encoded += "\\r"
+        case 0x09: encoded += "\\t"
+        case 0x00..<0x20: encoded += String(format: "\\u%04x", scalar.value)
+        default: encoded.unicodeScalars.append(scalar)
+        }
+    }
+    encoded += "\""
     return encoded
 }
