@@ -12,7 +12,9 @@ extension RichTemplateContext {
         }
     }
     var submittedActionId: String? {
-        ((message.metadata?["actions"]?.value as? [String: Any])?["submitted"] as? [String: Any])?["actionId"]
-            as? String
+        message.actions?.submittedActionId
+    }
+    var submittedActionIds: [String] {
+        message.actions?.submittedActionIds ?? submittedActionId.map { [$0] } ?? []
     }
 }

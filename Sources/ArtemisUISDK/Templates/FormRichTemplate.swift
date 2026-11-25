@@ -99,7 +99,7 @@ struct FormRichTemplate: View {
                 }
             }
             .buttonStyle(RichTemplateButtonStyle(
-                accentColor: context.accentColor, variant: .primary, minimumHeight: 44,
+                accentColor: context.accentColor, variant: .primary, minimumHeight: 40,
                 fontWeight: .semibold))
             .disabled(locked)
             if let error {

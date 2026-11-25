@@ -176,6 +176,9 @@ public struct ActionSet: Sendable {
     public let submitId: String?
     public let renderId: String?
     public let submittedActionId: String?
+    public let submittedActionIds: [String]
+
+    public var hasElements: Bool { !elements.isEmpty }
 }
 
 public struct ChannelFallbackItem: Sendable, Identifiable {
@@ -185,6 +188,8 @@ public struct ChannelFallbackItem: Sendable, Identifiable {
 }
 
 public struct RichContent: Sendable {
+    /// Recognized component keys in the order they appeared in the incoming payload.
+    public let componentOrder: [String]
     public let markdown: String?
     public let adaptiveCard: String?
     public let html: String?
@@ -233,7 +238,10 @@ extension Message {
     }
 
     public var richContent: RichContent? {
-        rawRichContent.flatMap(RichContentParser.parseRichContent)
+        rawRichContent.flatMap {
+            RichContentParser.parseRichContent(
+                $0, componentOrder: metadata?["_sdkRichContentOrder"]?.value as? [String])
+        }
     }
 
     public var rawActions: [String: Any]? {
@@ -253,12 +261,26 @@ enum RichContentParser {
         "list", "kpi", "table", "chart", "form", "progress", "feedback",
     ]
 
-    static func parseRichContent(_ json: [String: Any]) -> RichContent? {
+    static let webRendererOrder = [
+        "markdown", "html", "channel_fallback", "adaptive_card", "carousel", "image", "video", "audio", "file",
+        "list", "kpi", "table", "chart", "form", "progress", "feedback", "quick_replies",
+    ]
+
+    static func parseRichContent(_ json: [String: Any], componentOrder: [String]? = nil) -> RichContent? {
         var extensions: [String: AnySendable] = [:]
         for (key, value) in json where !knownKeys.contains(key) {
             extensions[key] = AnySendable(value)
         }
+        var orderedTypes: [String] = []
+        let preferredOrder = componentOrder ?? []
+        for key in preferredOrder + webRendererOrder {
+            let type = ["adaptive_card", "slack", "ag_ui", "whatsapp"].contains(key) ? "channel_fallback" : key
+            if (knownKeys.contains(type) || type == "channel_fallback"), !orderedTypes.contains(type) {
+                orderedTypes.append(type)
+            }
+        }
         let content = RichContent(
+            componentOrder: orderedTypes,
             markdown: string(json["markdown"]),
             adaptiveCard: string(json["adaptive_card"]),
             html: string(json["html"]),
@@ -304,13 +326,24 @@ enum RichContentParser {
                     required: bool(item["required"]) ?? false
                 )
             } ?? []
-        guard !elements.isEmpty else { return nil }
+        let rawRenderId = string(json["renderId"] ?? json["render_id"])
+        let renderId = rawRenderId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? rawRenderId : nil
+        let submittedActionId = dictionary(json["submitted"]).flatMap { string($0["actionId"]) }
+        var submittedActionIds = (array(json["submittedActionIds"]) ?? []).compactMap(string)
+        if let submittedActionId, !submittedActionIds.contains(submittedActionId) {
+            submittedActionIds.append(submittedActionId)
+        }
+        guard !elements.isEmpty || renderId != nil || submittedActionId != nil || !submittedActionIds.isEmpty else {
+            return nil
+        }
         return ActionSet(
             elements: elements,
             submitLabel: string(json["submit_label"]),
             submitId: string(json["submit_id"]),
-            renderId: string(json["renderId"] ?? json["render_id"]),
-            submittedActionId: dictionary(json["submitted"]).flatMap { string($0["actionId"]) }
+            renderId: renderId,
+            submittedActionId: submittedActionId,
+            submittedActionIds: submittedActionIds
         )
     }
 

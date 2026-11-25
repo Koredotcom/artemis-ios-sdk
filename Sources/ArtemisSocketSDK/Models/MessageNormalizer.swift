@@ -9,6 +9,9 @@ enum MessageNormalizer {
         if let localization = envelope["localization"] ?? raw["localization"] {
             metadata["localization"] = localization
         }
+        if let richContentOrder = raw["_sdkRichContentOrder"] as? [String] {
+            metadata["_sdkRichContentOrder"] = richContentOrder
+        }
         if let rich = raw["richContent"] ?? raw["rich_content"] ?? envelope["richContent"] ?? envelope["rich_content"] {
             metadata["richContent"] = normalizeRich(rich)
         }
@@ -83,7 +86,9 @@ enum MessageNormalizer {
             }
             return result
         }
-        guard !elements.isEmpty else { return nil }
+        guard !elements.isEmpty || actions["renderId"] != nil || actions["render_id"] != nil
+            || actions["submitted"] != nil || actions["submittedActionIds"] != nil
+        else { return nil }
         actions["elements"] = elements
         return actions
     }

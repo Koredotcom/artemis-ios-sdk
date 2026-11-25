@@ -112,7 +112,7 @@ extension ChatClientDelegate {
         guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatClientError.emptyActionId
         }
-        if alreadySubmitted(renderId) { return }
+        if alreadySubmitted(renderId, actionId: actionId) { return }
         try sessionManager.send(
             .actionSubmit(actionId: actionId, value: value, formData: formData, renderId: renderId))
         recordAction(actionId, value: value, renderId: renderId)
@@ -124,13 +124,14 @@ extension ChatClientDelegate {
         guard !actionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatClientError.emptyActionId
         }
-        if alreadySubmitted(renderId) { return }
+        if alreadySubmitted(renderId, actionId: actionId) { return }
+        let pendingActionKey = renderId.map { "\($0)\u{1f}\(actionId)" }
         if let renderId {
-            guard pendingActionRenders.insert(renderId).inserted else {
+            guard let pendingActionKey, pendingActionRenders.insert(pendingActionKey).inserted else {
                 throw AttachmentError("This action is already pending")
             }
         }
-        defer { if let renderId { pendingActionRenders.remove(renderId) } }
+        defer { if let pendingActionKey { pendingActionRenders.remove(pendingActionKey) } }
         var payload: [String: Any] = ["type": "action_submit", "actionId": actionId]
         payload["value"] = value
         payload["formData"] = formData
@@ -147,12 +148,18 @@ extension ChatClientDelegate {
             acceptedUser(id: id, text: displayText, metadata: nil, timestamp: acceptedAt)
         }
     }
-    private func alreadySubmitted(_ renderId: String?) -> Bool {
+    private func alreadySubmitted(_ renderId: String?, actionId: String) -> Bool {
         guard let renderId else { return false }
         return messages.contains { message in
             let actions = message.metadata?["actions"]?.value as? [String: Any] ?? [:]
-            return (actions["renderId"] as? String ?? message.id) == renderId
-                && actions["submitted"] != nil
+            guard (actions["renderId"] as? String ?? message.id) == renderId else { return false }
+            let submitted = actions["submitted"] as? [String: Any]
+            let submittedIds = actions["submittedActionIds"] as? [String] ?? []
+            if submittedIds.contains(actionId) { return true }
+            if let submittedActionId = submitted?["actionId"] as? String {
+                return submittedActionId == actionId
+            }
+            return submitted != nil
         }
     }
     private func recordAction(_ action: String, value: String?, renderId: String?) {
@@ -164,6 +171,9 @@ extension ChatClientDelegate {
             var metadata = message.metadata?.mapValues(\.value) ?? [:]
             var actions = metadata["actions"] as? [String: Any] ?? [:]
             guard (actions["renderId"] as? String ?? message.id) == renderId else { return message }
+            var submittedIds = actions["submittedActionIds"] as? [String] ?? []
+            if !submittedIds.contains(action) { submittedIds.append(action) }
+            actions["submittedActionIds"] = submittedIds
             actions["submitted"] = selection
             metadata["actions"] = actions
             return message.replacing(metadata: metadata.mapValues(AnySendable.init))
@@ -666,11 +676,16 @@ extension ChatClientDelegate {
             }
             let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             let records = body["messages"] as? [[String: Any]] ?? []
+            let richContentOrders = RichContentKeyOrderScanner.orders(in: data)
             result += records.compactMap { raw in
                 guard let id = raw["id"] as? String, let roleString = raw["role"] as? String,
                     let role = MessageRole(rawValue: roleString)
                 else { return nil }
-                return MessageNormalizer.parse(raw, role: role, id: id)
+                var orderedRaw = raw
+                if let richContentOrder = richContentOrders[id] {
+                    orderedRaw["_sdkRichContentOrder"] = richContentOrder
+                }
+                return MessageNormalizer.parse(orderedRaw, role: role, id: id)
             }
             guard body["hasMore"] as? Bool == true, let next = body["nextCursor"] as? String,
                 !next.isEmpty,

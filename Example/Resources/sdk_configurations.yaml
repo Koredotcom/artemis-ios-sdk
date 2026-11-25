@@ -7,7 +7,7 @@ artemis_sdk:
   channel:
     channel_id: "your-channel-id"
   theme:
-    primaryColor: "#0066FF"
+    primaryColor: "#6366f1"
     backgroundColor: "#FFFFFF"
     surfaceColor: "#F5F5F5"
     borderRadius: 16

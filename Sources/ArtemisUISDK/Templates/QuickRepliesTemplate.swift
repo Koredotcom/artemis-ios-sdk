@@ -8,7 +8,6 @@ struct QuickRepliesTemplate: View {
     @Environment(\.chatStrings) private var strings
     @Environment(\.chatTheme) private var theme
     let replies: [QuickReply]
-    let messageId: String
     let context: RichTemplateContext
     @State private var selected: String?
     @State private var pending = false
@@ -17,14 +16,13 @@ struct QuickRepliesTemplate: View {
         VStack(alignment: .leading, spacing: 8 * (theme?.spacingScale ?? 1)) {
             TemplateFlowRow(replies, spacing: 8 * (theme?.spacingScale ?? 1)) { reply in
                 Button {
-                    guard !pending, selected == nil, context.submittedActionId == nil else { return }
+                    guard !pending, selected == nil else { return }
                     pending = true
                     error = nil
                     Task {
                         defer { pending = false }
                         do {
-                            try await context.perform(
-                                reply.id, value: reply.label, renderId: messageId, displayText: reply.label)
+                            try await context.perform(reply.id, value: reply.label, displayText: reply.label)
                             selected = reply.id
                         } catch { self.error = strings("Reply could not be sent. Please retry.") }
                     }
@@ -46,9 +44,9 @@ struct QuickRepliesTemplate: View {
                     TemplateControlButtonStyle(
                         accentColor: context.accentColor,
                         variant: .quickReply,
-                        isSelected: (selected ?? context.submittedActionId) == reply.id)
+                        isSelected: selected == reply.id)
                 )
-                .disabled(pending || selected != nil || context.submittedActionId != nil)
+                .disabled(pending || selected != nil)
                 .accessibilityLabel(reply.label)
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }

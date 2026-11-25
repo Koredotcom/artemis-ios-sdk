@@ -75,11 +75,11 @@ struct ChatFooterView: View {
         return Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: iconSize))
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .foregroundStyle(iconColor)
                 .background(
                     buttonBackground,
-                    in: RoundedRectangle(cornerRadius: sendButtonRadius)
+                    in: RoundedRectangle(cornerRadius: 16)
                 )
         }
         .buttonStyle(.plain)

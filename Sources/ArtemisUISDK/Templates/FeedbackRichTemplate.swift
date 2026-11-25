@@ -122,7 +122,7 @@ struct FeedbackRichTemplate: View {
                         submit(includeComment: showsComment)
                     }
                     .buttonStyle(RichTemplateButtonStyle(
-                        accentColor: context.accentColor, variant: .outline, minimumHeight: 44,
+                        accentColor: context.accentColor, variant: .outline, minimumHeight: 40,
                         fontWeight: .semibold))
                     .disabled(selected == nil && !isCommentOnly || locked)
                 }

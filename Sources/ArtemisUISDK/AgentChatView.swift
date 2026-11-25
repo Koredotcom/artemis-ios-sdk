@@ -590,7 +590,7 @@ struct MessageBubble: View {
         max(1, rowWidth - 32 * (theme?.spacingScale ?? 1))
     }
     private var separatesActions: Bool {
-        message.role == .assistant && message.actions != nil
+        message.role == .assistant && message.actions?.hasElements == true
             && templateRegistry?.registeredTypes.contains(RichTemplateTypes.actions) != true
     }
     private var hasBubbleContent: Bool {

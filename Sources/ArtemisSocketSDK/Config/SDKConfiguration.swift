@@ -349,7 +349,7 @@ public struct ThemeConfig: Sendable {
     public static let `default` = ThemeConfig()
 
     public init(
-        primaryColor: String = "#0066FF",
+        primaryColor: String = "#6366f1",
         textColor: String = "#1A1A1A",
         backgroundColor: String = "#FFFFFF",
         surfaceColor: String = "#F5F5F5",
