@@ -375,7 +375,7 @@ public struct AgentChatView: View {
     private var closeChat: () -> Void {
         {
             dismissChatKeyboard()
-            if options.closeOrMinimizePopup.isShow {
+            if model.status == .connected && options.closeOrMinimizePopup.isShow {
                 isCloseOrMinimizePopupPresented = true
             } else {
                 performCloseChat()
