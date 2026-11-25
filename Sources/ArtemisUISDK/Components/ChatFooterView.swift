@@ -6,6 +6,8 @@ import Foundation
 #endif
 
 struct ChatFooterView: View {
+    private static let defaultBorderRadius: Double = 16
+
     @Environment(\.chatStrings) private var strings
     @Binding var text: String
     let enabled: Bool
@@ -56,10 +58,10 @@ struct ChatFooterView: View {
         .padding(.vertical, composerPaddingY)
         .background(Color(hexString: theme?.composeBarBackgroundColor ?? "#FFFFFF"))
         .overlay(
-            RoundedRectangle(cornerRadius: composerRadius)
+            RoundedRectangle(cornerRadius: 40)
                 .stroke(Color(hexString: theme?.borderColor ?? "#E2E8F0"), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: composerRadius))
+        .clipShape(RoundedRectangle(cornerRadius: 40))
         .padding(.horizontal, composerMargin)
         .padding(.vertical, 5)
         .background(Color(hexString: theme?.backgroundColor ?? "#FFFFFF"))
@@ -77,10 +79,7 @@ struct ChatFooterView: View {
                 .font(.system(size: iconSize))
                 .frame(width: 32, height: 32)
                 .foregroundStyle(iconColor)
-                .background(
-                    buttonBackground,
-                    in: RoundedRectangle(cornerRadius: 16)
-                )
+                .background(buttonBackground, in: Circle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -133,11 +132,14 @@ struct ChatFooterView: View {
     }
 
     private var baseBorderRadius: CGFloat {
-        min(40, max(0, CGFloat(theme?.borderRadius ?? 16)))
+        let configuredRadius = theme?.borderRadius ?? Self.defaultBorderRadius
+        let radius = configuredRadius.isFinite
+            ? min(40, max(0, configuredRadius))
+            : Self.defaultBorderRadius
+        return CGFloat(radius)
     }
 
     private var composerRadius: CGFloat { baseBorderRadius + 6 }
-    private var sendButtonRadius: CGFloat { max(8, baseBorderRadius) }
 
     private var sendButtonBackground: Color {
         Color(hexString: theme?.headerBackgroundColor ?? theme?.primaryColor ?? "#0066FF")
