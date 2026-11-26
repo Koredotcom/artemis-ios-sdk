@@ -128,15 +128,19 @@ struct TableRichTemplate: View {
         let cellAlignment = alignment.frameAlignment
         let headerFill = tableSurface.overlay(accentColor.opacity(0.15))
 
-        return Text(text)
-            .font(
-                chatTheme?.font(size: isHeader ? 11 : 12, weight: isHeader ? .bold : .regular)
-                    ?? .system(size: isHeader ? 11 : 12, weight: isHeader ? .bold : .regular)
-            )
-            .tracking(isHeader ? 0.44 : 0)
+        return Group {
+            if isHeader {
+                if #available(iOS 16.0, macOS 13.0, *) {
+                    Text(text).templateTitle().tracking(0.44)
+                } else {
+                    Text(text).templateTitle()
+                }
+            } else {
+                Text(text).templateBody(muted: false)
+            }
+        }
             .multilineTextAlignment(alignment.textAlignment)
             .lineSpacing(2)
-            .foregroundStyle(templateStyle.text)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

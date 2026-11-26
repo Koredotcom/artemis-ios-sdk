@@ -367,8 +367,8 @@ extension View {
     func templateTitle() -> some View {
         modifier(TemplateTextModifier(size: 15, weight: .semibold, muted: false))
     }
-    func templateBody() -> some View {
-        modifier(TemplateTextModifier(size: 15, weight: .regular, muted: true))
+    func templateBody(muted: Bool = true) -> some View {
+        modifier(TemplateTextModifier(size: 14, weight: .regular, muted: muted))
     }
     func templateSectionLabel() -> some View {
         modifier(TemplateTextModifier(size: 14, weight: .bold, muted: true))
