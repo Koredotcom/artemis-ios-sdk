@@ -30,6 +30,23 @@ public struct QuickReply: Sendable, Identifiable {
     public let iconURL: String?
 }
 
+public enum DeepLinkNavigation: Sendable {
+    case internalLink
+    case external
+}
+
+public struct DeepLinkElement: Sendable {
+    public let title: String
+    public let url: String
+    public let navigation: DeepLinkNavigation
+}
+
+public struct DeepLinkTemplate: Sendable {
+    public let text: String?
+    public let lang: String?
+    public let elements: [DeepLinkElement]
+}
+
 public struct MediaContent: Sendable {
     public let url: String
     public let alt: String?
@@ -198,6 +215,7 @@ public struct RichContent: Sendable {
     public let whatsapp: String?
     public let carousel: CarouselTemplate?
     public let quickReplies: [QuickReply]?
+    public let deepLink: DeepLinkTemplate?
     public let image: MediaContent?
     public let video: MediaContent?
     public let audio: MediaContent?
@@ -257,13 +275,13 @@ extension Message {
 enum RichContentParser {
     static let knownKeys: Set<String> = [
         "markdown", "adaptive_card", "html", "slack", "ag_ui", "whatsapp",
-        "carousel", "quick_replies", "image", "video", "audio", "file",
+        "carousel", "quick_replies", "deep_link", "image", "video", "audio", "file",
         "list", "kpi", "table", "chart", "form", "progress", "feedback",
     ]
 
     static let webRendererOrder = [
         "markdown", "html", "channel_fallback", "adaptive_card", "carousel", "image", "video", "audio", "file",
-        "list", "kpi", "table", "chart", "form", "progress", "feedback", "quick_replies",
+        "list", "kpi", "table", "chart", "form", "progress", "feedback", "quick_replies", "deep_link",
     ]
 
     static func parseRichContent(_ json: [String: Any], componentOrder: [String]? = nil) -> RichContent? {
@@ -290,6 +308,7 @@ enum RichContentParser {
             carousel: dictionary(json["carousel"]).flatMap(parseCarousel),
             quickReplies: array(json["quick_replies"])?.compactMap { dictionary($0).flatMap(parseQuickReply) }
                 .nilIfEmpty,
+            deepLink: dictionary(json["deep_link"]).flatMap(parseDeepLink),
             image: dictionary(json["image"]).flatMap(parseMedia),
             video: dictionary(json["video"]).flatMap(parseMedia),
             audio: dictionary(json["audio"]).flatMap(parseMedia),
@@ -378,6 +397,26 @@ enum RichContentParser {
         guard let label = string(json["label"]), !label.isEmpty else { return nil }
         return QuickReply(
             id: string(json["id"]) ?? label, label: label, iconURL: string(json["icon_url"] ?? json["iconUrl"]))
+    }
+
+    private static func parseDeepLink(_ json: [String: Any]) -> DeepLinkTemplate? {
+        let text = nonEmptyString(json["text"])
+        let elements = array(json["elements"])?.prefix(50).compactMap { raw -> DeepLinkElement? in
+            guard let item = dictionary(raw),
+                let title = nonEmptyString(item["title"]),
+                let url = nonEmptyString(item["url"])
+            else { return nil }
+            let navigation = string(item["navigation_type"])?.lowercased() == "internal"
+                ? DeepLinkNavigation.internalLink : .external
+            return DeepLinkElement(title: title, url: url, navigation: navigation)
+        } ?? []
+        guard text != nil || !elements.isEmpty else { return nil }
+        return DeepLinkTemplate(text: text, lang: string(json["lang"]), elements: elements)
+    }
+
+    private static func nonEmptyString(_ raw: Any?) -> String? {
+        guard let value = string(raw)?.templateTrimmed, !value.isEmpty else { return nil }
+        return value
     }
 
     private static func parseMedia(_ json: [String: Any]) -> MediaContent? {
@@ -519,6 +558,7 @@ enum RichContentParser {
         ].contains { !($0?.trimmed.isEmpty ?? true) }
             || content.carousel != nil
             || !(content.quickReplies?.isEmpty ?? true)
+            || content.deepLink != nil
             || content.image != nil
             || content.video != nil
             || content.audio != nil

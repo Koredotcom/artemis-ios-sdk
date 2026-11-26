@@ -111,6 +111,7 @@ public enum RichTemplateTypes {
     public static let feedback = "feedback"
     public static let actions = "actions"
     public static let quickReplies = "quick_replies"
+    public static let deepLink = "deep_link"
     public static let channelFallback = "channel_fallback"
 }
 
@@ -126,6 +127,8 @@ public struct RichTemplateContext {
     public let sendRichFeedback:
         ((String, String, Int, String?, Int?, String?) async throws -> Void)?
     public let presentation: ChatPresentationState?
+    public let deepLinkBaseURL: String?
+    public let onInternalDeepLink: ((String) -> Void)?
     public let submitFeedback:
         (_ messageId: String, _ ratingType: String, _ ratingValue: Int, _ actionRenderId: String?) ->
             Void
@@ -137,7 +140,8 @@ public struct RichTemplateContext {
             nil,
         sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil,
         sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil,
-        presentation: ChatPresentationState? = nil
+        presentation: ChatPresentationState? = nil, deepLinkBaseURL: String? = nil,
+        onInternalDeepLink: ((String) -> Void)? = nil
     ) {
         self.message = message
         self.theme = theme
@@ -148,6 +152,8 @@ public struct RichTemplateContext {
         self.sendFeedback = sendFeedback
         self.sendRichFeedback = sendRichFeedback
         self.presentation = presentation
+        self.deepLinkBaseURL = deepLinkBaseURL
+        self.onInternalDeepLink = onInternalDeepLink
     }
 }
 
@@ -854,6 +860,12 @@ public enum AgentChatUI {
     }
     public var feedbackEnabled: Bool {
         sdk?.configuration.features.enableFeedback ?? configuration?.features.enableFeedback ?? true
+    }
+    var sendAllDeepLink: Bool {
+        sdk?.configuration.features.sendAllDeepLink ?? configuration?.features.sendAllDeepLink ?? false
+    }
+    var connectionEndpoint: String? {
+        sdk?.configuration.connection.endpoint ?? configuration?.connection.endpoint
     }
     public var citationsEnabled: Bool {
         sdk?.configuration.features.enableCitations ?? configuration?.features.enableCitations ?? true

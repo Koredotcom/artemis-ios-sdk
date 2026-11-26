@@ -14,3 +14,4 @@ artemis_sdk:
   features:
     enable_markdown: true
     enable_carousel: true
+    send_all_deep_link: false

@@ -414,6 +414,7 @@ public struct FeaturesConfig: Sendable {
     public let enableContactCenter: Bool
     public let enableHistory: Bool
     public let enableCitations: Bool
+    public let sendAllDeepLink: Bool
     /// Opt in to the assistant attribution displayed below completed AI messages.
     public let showAnsweredByAI: Bool
 
@@ -434,6 +435,7 @@ public struct FeaturesConfig: Sendable {
         enableContactCenter: Bool = true,
         enableHistory: Bool = true,
         enableCitations: Bool = true,
+        sendAllDeepLink: Bool = false,
         showAnsweredByAI: Bool = false
     ) {
         self.enableRichContent = enableRichContent
@@ -450,6 +452,7 @@ public struct FeaturesConfig: Sendable {
         self.enableContactCenter = enableContactCenter
         self.enableHistory = enableHistory
         self.enableCitations = enableCitations
+        self.sendAllDeepLink = sendAllDeepLink
         self.showAnsweredByAI = showAnsweredByAI
     }
 }
@@ -676,6 +679,8 @@ enum SDKConfigurationParser {
                 enableContactCenter: featuresMap["enable_contact_center"] as? Bool ?? true,
                 enableHistory: featuresMap["enable_history"] as? Bool ?? true,
                 enableCitations: featuresMap["enable_citations"] as? Bool ?? true,
+                sendAllDeepLink: featuresMap["send_all_deep_link"] as? Bool
+                    ?? featuresMap["sendAllDeepLink"] as? Bool ?? false,
                 showAnsweredByAI: featuresMap["show_answered_by_ai"] as? Bool
                     ?? featuresMap["showAnsweredByAI"] as? Bool ?? false
             ),

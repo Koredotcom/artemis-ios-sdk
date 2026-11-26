@@ -95,6 +95,9 @@ struct RichContentTemplatesView: View {
         case RichTemplateTypes.quickReplies:
             guard !isSuppressed(type), let replies = richContent?.quickReplies else { return AnyView(EmptyView()) }
             return AnyView(QuickRepliesTemplate(replies: replies, context: context))
+        case RichTemplateTypes.deepLink:
+            guard !isSuppressed(type), let deepLink = richContent?.deepLink else { return AnyView(EmptyView()) }
+            return AnyView(DeepLinkRichTemplate(deepLink: deepLink, context: context))
         case RichTemplateTypes.channelFallback:
             guard !isSuppressed(type), let items = richContent?.channelFallbackItems, !items.isEmpty
             else { return AnyView(EmptyView()) }

@@ -99,6 +99,10 @@ public struct AgentChatView: View {
         chatContent
             .environment(\.openURL, OpenURLAction { url in
                 if url.isHTTP {
+                    if model.sendAllDeepLink {
+                        emitDeepLinkAndMinimize(url.absoluteString)
+                        return .handled
+                    }
                     #if os(iOS)
                         safariPresentation = ChatSafariPresentation(url: url)
                         return .handled
@@ -191,6 +195,8 @@ public struct AgentChatView: View {
                                     $0, ratingType: $1, ratingValue: $2, actionRenderId: $0,
                                     feedbackText: $3, followUpRating: $4, followUpText: $5)
                             },
+                            deepLinkBaseURL: model.connectionEndpoint,
+                            onInternalDeepLink: emitDeepLinkAndMinimize,
                             presentation: model.presentation, showCitations: model.citationsEnabled,
                             showAgentLinks: model.contactCenterEnabled,
                             showAnsweredByAI: model.showAnsweredByAI,
@@ -394,6 +400,12 @@ public struct AgentChatView: View {
         }
         (onClose ?? { dismiss() })()
     }
+    private func emitDeepLinkAndMinimize(_ url: String) {
+        model.emitHostEvent(
+            AgentChatEvent(eventCode: "DeepLinkClicked", eventMessage: url, eventReason: 5))
+        handle?.minimize()
+        (onClose ?? { dismiss() })()
+    }
     private var minimizeChat: () -> Void {
         {
             guard handle != nil else { return }
@@ -550,6 +562,8 @@ struct MessageBubble: View {
     var performAction: ((String, String?, [String: String]?, String?, String?) async throws -> Void)? = nil
     var sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil
     var sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil
+    var deepLinkBaseURL: String? = nil
+    var onInternalDeepLink: ((String) -> Void)? = nil
     var presentation: ChatPresentationState? = nil
     var showCitations = true
     var showAgentLinks = false
@@ -778,7 +792,8 @@ struct MessageBubble: View {
         RichTemplateContext(
             message: message, theme: theme, accentColor: Color(hexString: theme?.primaryColor),
             submitAction: onSubmitAction, submitFeedback: onSubmitFeedback, performAction: performAction,
-            sendFeedback: sendFeedback, sendRichFeedback: sendRichFeedback, presentation: presentation)
+            sendFeedback: sendFeedback, sendRichFeedback: sendRichFeedback, presentation: presentation,
+            deepLinkBaseURL: deepLinkBaseURL, onInternalDeepLink: onInternalDeepLink)
     }
 }
 
