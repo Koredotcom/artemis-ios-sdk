@@ -10,6 +10,7 @@
 		5736DEB2822F4D4A9B96B952 /* Pods_ArtemisUIExample.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C3EDB739F3CEC458E70B3D1 /* Pods_ArtemisUIExample.framework */; };
 		A10000000000000000000001 /* ArtemisUIExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ArtemisUIExampleApp.swift */; };
 		A10000000000000000000004 /* sdk_configurations.yaml in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* sdk_configurations.yaml */; };
+		A10000000000000000000006 /* CustomerSessionBootstrapProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* CustomerSessionBootstrapProvider.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -19,6 +20,7 @@
 		A10000000000000000000002 /* ArtemisUIExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtemisUIExampleApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000005 /* sdk_configurations.yaml */ = {isa = PBXFileReference; lastKnownFileType = text; path = sdk_configurations.yaml; sourceTree = "<group>"; };
+		A10000000000000000000007 /* CustomerSessionBootstrapProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomerSessionBootstrapProvider.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* ArtemisUIExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = ArtemisUIExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -47,6 +49,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000002 /* ArtemisUIExampleApp.swift */,
+				A10000000000000000000007 /* CustomerSessionBootstrapProvider.swift */,
 				A10000000000000000000003 /* Info.plist */,
 				A10000000000000000000016 /* Resources */,
 			);
@@ -204,6 +207,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000001 /* ArtemisUIExampleApp.swift in Sources */,
+				A10000000000000000000006 /* CustomerSessionBootstrapProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -214,11 +218,14 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7FD7C88512345039D441334D /* Pods-ArtemisUIExample.debug.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = TUE6KHKZ4Z;
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.ArtemisUIExample;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kore.sdk;
 				PRODUCT_NAME = ArtemisUIExample;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -229,11 +236,14 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 6C7329F2B5CFCDB023A985A6 /* Pods-ArtemisUIExample.release.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = TUE6KHKZ4Z;
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.ArtemisUIExample;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kore.sdk;
 				PRODUCT_NAME = ArtemisUIExample;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";

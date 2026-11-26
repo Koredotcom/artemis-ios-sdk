@@ -586,6 +586,13 @@ struct MessageBubble: View {
             && (message.richContent != nil || separatesActions
                 || templateRegistry?.renderers(for: message).isEmpty == false)
     }
+    private var isTextOnlyAssistantResponse: Bool {
+        message.role == .assistant && !message.content.templateTrimmed.isEmpty
+            && message.richContent == nil
+            && message.actions?.hasElements != true
+            && templateRegistry?.renderers(for: message).isEmpty != false
+            && attachments.isEmpty
+    }
     private var botResponseTemplateWidth: CGFloat {
         max(1, rowWidth - 32 * (theme?.spacingScale ?? 1))
     }
@@ -630,7 +637,11 @@ struct MessageBubble: View {
                     bubble
                         .frame(
                             maxWidth: max(
-                                1, rowWidth - (isUser || hasBotResponseTemplate ? 0 : 40)),
+                                1,
+                                isUser || hasBotResponseTemplate
+                                    ? rowWidth
+                                    : (isTextOnlyAssistantResponse ? rowWidth * 0.75 : rowWidth - 40)
+                            ),
                             alignment: isUser ? .trailing : .leading
                         )
                         .simultaneousGesture(TapGesture().onEnded { timestampInteracting.toggle() })
@@ -698,6 +709,7 @@ struct MessageBubble: View {
                 if message.metadata?["contentFormat"]?.value as? String == "plain_text"
                     || message.role == .system
                     || message.role == .thought
+                    || isTextOnlyAssistantResponse
                 {
                     Text(
                         message.metadata?["sdkStringKey"]?.value as? String == nil
@@ -705,7 +717,9 @@ struct MessageBubble: View {
                     ).font(
                         theme?.font(size: message.role == .system ? 12 : 16)
                             ?? (message.role == .system ? .caption : .body)
-                    ).textSelection(.enabled)
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
                 } else {
                     ChatMarkdownView(
                         content: message.content, linkColor: messageTextColor,

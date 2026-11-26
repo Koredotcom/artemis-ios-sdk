@@ -26,7 +26,7 @@ public struct MessageTimestampSettings: Sendable, Equatable {
     public var customFormat: String?
     public init(
         enabled: Bool = true, visibility: Visibility = .always, position: Position = .below,
-        timeFormat: TimeFormat = .locale, dateFormat: DateFormat = .locale,
+        timeFormat: TimeFormat = .twentyFourHour, dateFormat: DateFormat = .locale,
         customFormat: String? = nil
     ) {
         self.enabled = enabled
@@ -43,7 +43,7 @@ public struct MessageTimestampSettings: Sendable, Equatable {
                 ?? .always,
             position: Position(rawValue: runtime["messageTimestampPosition"] as? String ?? "") ?? .below,
             timeFormat: TimeFormat(rawValue: runtime["messageTimestampTimeFormat"] as? String ?? "")
-                ?? .locale,
+                ?? .twentyFourHour,
             dateFormat: DateFormat(rawValue: runtime["messageTimestampDateFormat"] as? String ?? "")
                 ?? .locale,
             customFormat: runtime["messageTimestampFormat"] as? String)
@@ -66,7 +66,7 @@ public struct MessageTimestampSettings: Sendable, Equatable {
             visibility: Visibility(rawValue: widgetTheme?.messageTimestampVisibility ?? "") ?? .always,
             position: Position(rawValue: widgetTheme?.messageTimestampPosition ?? "") ?? .below,
             timeFormat: configuredTimeFormat
-                ?? TimeFormat(rawValue: widgetTheme?.messageTimestampTimeFormat ?? "") ?? .locale,
+                ?? TimeFormat(rawValue: widgetTheme?.messageTimestampTimeFormat ?? "") ?? .twentyFourHour,
             dateFormat: configuredDateFormat
                 ?? DateFormat(rawValue: widgetTheme?.messageTimestampDateFormat ?? "") ?? .locale,
             customFormat: customFormat)
