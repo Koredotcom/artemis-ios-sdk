@@ -32,6 +32,7 @@ struct FeedbackRichTemplate: View {
     @State private var submitted = false
     @State private var error: String?
 
+    private var presentationKey: String { messageId + ":feedback" }
     private var supported: Bool { ["thumbs", "star", "stars", "scale", "text"].contains(feedback.type) }
     private var maxRating: Int { min(20, max(1, feedback.max)) }
     private var isCommentOnly: Bool { feedback.type == "text" }
@@ -138,7 +139,11 @@ struct FeedbackRichTemplate: View {
         .richTemplateCard()
         .padding(.top, 0)
         .onAppear {
-            submitted = context.presentation?.values(for: messageId + ":feedback")["submitted"] == "true"
+            let values = context.presentation?.values(for: presentationKey) ?? [:]
+            submitted = values["submitted"] == "true"
+            if let rawRating = values["selectedRating"], let rating = Int(rawRating), isValidRating(rating) {
+                selected = rating
+            }
             if isCommentOnly, selected == nil { selected = 0 }
         }
         .onChange(of: commentText) { if $0.count > 5000 { commentText = String($0.prefix(5000)) } }
@@ -326,6 +331,7 @@ struct FeedbackRichTemplate: View {
     private func choose(_ value: Int) {
         guard !locked else { return }
         selected = value
+        savePresentationState()
         if !commentShouldShow(for: value) { commentText = "" }
         followUpRating = nil
         followUpText = ""
@@ -396,11 +402,30 @@ struct FeedbackRichTemplate: View {
                     context.submitFeedback(messageId, ratingType, value, messageId)
                 }
                 submitted = true
-                context.presentation?.save(["submitted": "true"], for: messageId + ":feedback")
+                savePresentationState(submitted: true)
             } catch {
                 self.error = strings("Could not save feedback. Try again.")
             }
         }
+    }
+
+    private func isValidRating(_ value: Int) -> Bool {
+        if isStar { return (1...maxRating).contains(value) }
+        if isThumbs { return (0...1).contains(value) }
+        if feedback.type == "scale" { return (0...10).contains(value) }
+        return isCommentOnly && value == 0
+    }
+
+    private func savePresentationState(submitted: Bool? = nil) {
+        guard let presentation = context.presentation else { return }
+        var values = presentation.values(for: presentationKey)
+        if let selected {
+            values["selectedRating"] = String(selected)
+        } else {
+            values.removeValue(forKey: "selectedRating")
+        }
+        if let submitted { values["submitted"] = submitted ? "true" : "false" }
+        presentation.save(values, for: presentationKey)
     }
 
     private var statusText: String? {
