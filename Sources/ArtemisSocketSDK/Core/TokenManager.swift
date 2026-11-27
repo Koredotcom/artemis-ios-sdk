@@ -5,6 +5,8 @@ private let refreshLeewayMs: Int64 = 60 * 1000
 
 /// Bootstrap and refresh short-lived SDK session tokens.
 @MainActor final class TokenManager {
+    private static var sentBootstrapTokenDigests = Set<String>()
+
     private let config: SDKConfiguration
     private let httpEndpoint: String
     private let urlSession: URLSession
@@ -114,14 +116,22 @@ private let refreshLeewayMs: Int64 = 60 * 1000
         var body: [String: Any] = [:]
         var headers = ["Content-Type": "application/json"]
 
-        if let provider = config.connection.bootstrapTokenProvider {
+        let configuredBootstrapToken = config.connection.bootstrapToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configuredBootstrapToken, !configuredBootstrapToken.isEmpty,
+            config.connection.bootstrapTokenProvider != nil,
+            Self.markInitialBootstrapTokenAsSent(configuredBootstrapToken)
+        {
+            // Hosted bootstrap tokens are single-use. Consume the configured initial token once,
+            // across clients in this process, then use the provider for later initializations.
+            body["bootstrapToken"] = configuredBootstrapToken
+        } else if let provider = config.connection.bootstrapTokenProvider {
             let value = try await provider().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {
                 throw TokenResponseValidationError(message: "Bootstrap provider returned an empty token")
             }
             body["bootstrapToken"] = value
-        } else if let bootstrapToken = config.connection.bootstrapToken, !bootstrapToken.isEmpty {
-            body["bootstrapToken"] = bootstrapToken
+        } else if let configuredBootstrapToken, !configuredBootstrapToken.isEmpty {
+            body["bootstrapToken"] = configuredBootstrapToken
         } else {
             if let channel = config.channel {
                 if let channelId = channel.channelId, !channelId.isEmpty {
@@ -196,6 +206,11 @@ private let refreshLeewayMs: Int64 = 60 * 1000
             }
         }
         return value
+    }
+
+    private static func markInitialBootstrapTokenAsSent(_ token: String) -> Bool {
+        let digest = SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+        return sentBootstrapTokenDigests.insert(digest).inserted
     }
 
     private func refreshToken(_ currentToken: String) async throws -> String {

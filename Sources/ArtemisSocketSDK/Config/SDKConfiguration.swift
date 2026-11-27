@@ -99,7 +99,9 @@ public struct ConnectionConfig: Sendable {
     public let projectId: String
     public let endpoint: String
     public let apiKey: String?
+    /// A hosted-bootstrap token. When paired with a provider, it is sent to the first init only.
     public let bootstrapToken: String?
+    /// Supplies fresh single-use hosted-bootstrap tokens. May be used alone or with an initial token.
     public let bootstrapTokenProvider: (@Sendable () async throws -> String)?
     public let clientSessionIdentifier: Bool
     public let sessionMetadata: [String: AnySendable]?

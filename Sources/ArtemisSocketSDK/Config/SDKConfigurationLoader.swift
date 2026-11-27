@@ -184,17 +184,17 @@ public enum SDKConfigurationLoader {
         if !config.connection.endpoint.hasPrefix("http://") && !config.connection.endpoint.hasPrefix("https://") {
             errors.append("connection.endpoint must start with http:// or https://")
         }
-        let credentials =
-            [config.connection.apiKey, config.connection.bootstrapToken].compactMap { $0 }.filter {
-                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }.count
-            + (config.connection.bootstrapTokenProvider == nil ? 0 : 1)
-        if credentials != 1 {
-            errors.append("Provide exactly one API key, bootstrap token or bootstrap token provider")
+        let hasAPIKey = config.connection.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasBootstrapToken =
+            config.connection.bootstrapToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasBootstrapTokenProvider = config.connection.bootstrapTokenProvider != nil
+        let hasHostedBootstrap = hasBootstrapToken || hasBootstrapTokenProvider
+        if hasAPIKey == hasHostedBootstrap {
+            errors.append("Provide an API key or a bootstrap token, optionally with a bootstrap token provider")
         }
         let explicitChannel = [config.channel?.channelId, config.channel?.channelName, config.channel?.deploymentSlug]
             .compactMap { $0 }.contains { !$0.isEmpty }
-        if config.connection.apiKey == nil
+        if !hasAPIKey
             && (explicitChannel || config.userContext != nil || config.connection.clientSessionIdentifier)
         {
             errors.append(

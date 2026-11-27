@@ -27,17 +27,17 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
             case .invalidEndpoint:
                 return "The customer-session endpoint must be an absolute HTTP(S) or WS(S) URL."
             case .missingChannelSecret:
-                return "ARTEMIS_SAMPLE_CHANNEL_SECRET is required for hosted bootstrap."
+                return "A channel secret is required for hosted bootstrap."
             case .missingTenantID:
-                return "ARTEMIS_SAMPLE_TENANT_ID is required for hosted bootstrap."
+                return "A tenant ID is required for hosted bootstrap."
             case .missingProjectID:
-                return "ARTEMIS_SAMPLE_PROJECT_ID is required for hosted bootstrap."
+                return "A project ID is required for hosted bootstrap."
             case .missingChannel:
-                return "Set ARTEMIS_SAMPLE_CHANNEL_ID or ARTEMIS_SAMPLE_CHANNEL_NAME."
+                return "A customer-session channel ID or name is required."
             case .missingVerifiedUserID:
-                return "ARTEMIS_SAMPLE_VERIFIED_USER_ID is required for hosted bootstrap."
+                return "A verified user ID is required for hosted bootstrap."
             case .invalidCustomAttributes:
-                return "ARTEMIS_SAMPLE_CUSTOM_ATTRIBUTES_JSON must be a JSON object."
+                return "Customer-session custom attributes must be a JSON object."
             case .requestEncodingFailed:
                 return "The customer-session request could not be encoded."
             case .networkFailure:
@@ -78,27 +78,19 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
     private var requestCount = 0
     private var mintCount = 0
 
-    /// Matches the Android sample's mode selection: a configured channel secret enables hosted bootstrap.
-    static func isBootstrapAuthenticationConfigured() -> Bool {
-        configuredValue("ARTEMIS_SAMPLE_CHANNEL_SECRET", in: ProcessInfo.processInfo.environment) != nil
-    }
-
-    /// Builds the sample's hosted-bootstrap configuration, mints its first token, and adapts the
-    /// one-time initial token to the iOS SDK's async token-provider interface.
-    static func makeSDKConfigurationFromEnvironment() async throws -> SDKConfiguration {
-        let environment = ProcessInfo.processInfo.environment
-        let projectID = configuredValue("ARTEMIS_SAMPLE_PROJECT_ID", in: environment) ?? ""
-        let endpoint = configuredValue("ARTEMIS_SAMPLE_ENDPOINT", in: environment)
-            ?? "https://agents-dev.kore.ai"
-        let tenantID = configuredValue("ARTEMIS_SAMPLE_TENANT_ID", in: environment) ?? ""
-        let channelSecret = configuredValue("ARTEMIS_SAMPLE_CHANNEL_SECRET", in: environment) ?? ""
-        let verifiedUserID = configuredValue("ARTEMIS_SAMPLE_VERIFIED_USER_ID", in: environment) ?? ""
-        let channelID = environment["ARTEMIS_SAMPLE_CHANNEL_ID"].flatMap(nonEmpty)
-        let channelName = configuredValue("ARTEMIS_SAMPLE_CHANNEL_NAME", in: environment) ?? "Support"
-        let customAttributes = try parseCustomAttributes(
-            environment["ARTEMIS_SAMPLE_CUSTOM_ATTRIBUTES_JSON"]
-        )
-
+    /// Builds a hosted-bootstrap configuration from values supplied by the example host app.
+    /// It pairs the pre-minted initial token with a provider for later single-use tokens.
+    static func makeSDKConfigurationFromEnvironment(
+        environment: String,
+        projectID: String,
+        endpoint: String,
+        tenantID: String,
+        channelSecret: String,
+        verifiedUserID: String,
+        channelID: String?,
+        channelName: String?,
+        customAttributes: [String: Any]?
+    ) async throws -> SDKConfiguration {
         let provider = try CustomerSessionBootstrapProvider(
             endpoint: endpoint,
             channelSecret: channelSecret,
@@ -113,11 +105,12 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
         let initialToken = try await provider.getToken()
 
         return SDKConfiguration(
-            environment: "dev",
+            environment: environment,
             connection: ConnectionConfig(
                 projectId: projectID,
                 endpoint: sdkEndpoint,
-                bootstrapTokenProvider: provider.sdkTokenProvider(initialToken: initialToken)
+                bootstrapToken: initialToken,
+                bootstrapTokenProvider: { try await provider.getToken() }
             )
         )
     }
@@ -222,18 +215,6 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
         return token
     }
 
-    /// Adapts Android's initial-token-plus-provider flow to the iOS SDK's async provider API.
-    /// The SDK consumes the already-minted token once; every later init call mints a new token.
-    func sdkTokenProvider(initialToken: String) -> @Sendable () async throws -> String {
-        let pendingInitialToken = OneShotBootstrapToken(initialToken)
-        return { [self, pendingInitialToken] in
-            if let initialToken = pendingInitialToken.take() {
-                return initialToken
-            }
-            return try await getToken()
-        }
-    }
-
     private func requestBody() throws -> Data {
         var body: [String: Any] = [
             "tenantId": tenantID,
@@ -271,26 +252,6 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
         defer { counterLock.unlock() }
         mintCount += 1
         return mintCount
-    }
-
-    private static func configuredValue(_ key: String, in environment: [String: String]) -> String? {
-        environment[key].flatMap(nonEmpty)
-    }
-
-    private static func nonEmpty(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private static func parseCustomAttributes(_ json: String?) throws -> [String: Any]? {
-        guard let json = json.flatMap(nonEmpty) else { return nil }
-        guard let data = json.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data),
-            let attributes = object as? [String: Any]
-        else {
-            throw ProviderError.invalidCustomAttributes
-        }
-        return attributes
     }
 
     static func httpEndpoint(from endpoint: String) throws -> String {
@@ -336,19 +297,5 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
             }
         }
         return nil
-    }
-}
-
-private final class OneShotBootstrapToken: @unchecked Sendable {
-    private let lock = NSLock()
-    private var token: String?
-
-    init(_ token: String) { self.token = token }
-
-    func take() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        defer { token = nil }
-        return token
     }
 }

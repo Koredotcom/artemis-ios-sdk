@@ -10,16 +10,27 @@ struct ContentView: View {
     @State private var presentedChat: ChatPresentation?
     @State private var chatHandle: AgentChatHandle?
     @State private var eventRegistration: ArtemisUiEventRegistration?
-
+    @State private var bootstrapToken: String?
+    @State private var bootstrapConfiguration: SDKConfiguration?
+    
+    // Set to false to skip token generation and use API Key Authentication.
+    private let isGeneratingBootstrapToken = false
+    @State private var isPreparingAuthentication = true
+    
     private let projectID = "your-project-id"
     private let endpoint = "https://runtime.example.com"
     private let channelID = "your-channel-id"
+    private let sdkEnvironment = "dev"
     
     // Replace these values with the host application's runtime configuration.
     private let apiKey = "pk_your_public_key"
     
-    // Set this environment variable in the app scheme to use Bootstrap Token Authentication.
-    private let bootstrapToken = ProcessInfo.processInfo.environment["ARTEMIS_SAMPLE_BOOTSTRAP_TOKEN"]
+    // Replace these values with the host application's runtime configuration for bootstrapToken and bootstrapConfiguration.
+    private let tenantID = "your-tenant-id"
+    private let channelSecret = "sk_channel_secret_key"
+    private let verifiedUserID = "sample_verified_user-id"
+    private let chatTitle = "chat_title"
+    private let customerSessionCustomAttributes: [String: Any] = [:]
 
     var body: some View {
         NavigationView {
@@ -46,7 +57,9 @@ struct ContentView: View {
                     }
                     chatHandle = handle
                     presentedChat = ChatPresentation(handle: handle)
-                }.buttonStyle(.borderedProminent)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isPreparingAuthentication)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("")
@@ -66,27 +79,70 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .task {
+            await prepareAuthentication()
+        }
     }
 
     private var configuration: SDKConfiguration {
         let token = bootstrapToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let usesBootstrapToken = !token.isEmpty
+        if isGeneratingBootstrapToken, !token.isEmpty, let bootstrapConfiguration {
+            return SDKConfiguration(
+                environment: bootstrapConfiguration.environment,
+                connection: ConnectionConfig(
+                    projectId: bootstrapConfiguration.connection.projectId,
+                    endpoint: bootstrapConfiguration.connection.endpoint,
+                    bootstrapToken: token,
+                    bootstrapTokenProvider: bootstrapConfiguration.connection.bootstrapTokenProvider
+                )
+            )
+        }
 
         return SDKConfiguration(
             environment: "dev",
             connection: ConnectionConfig(
                 projectId: projectID,
                 endpoint: endpoint,
-                apiKey: usesBootstrapToken ? nil : apiKey,
-                bootstrapToken: usesBootstrapToken ? token : nil
+                apiKey: apiKey
             ),
-            // Bootstrap tokens carry their own channel and user scope.
-            channel: usesBootstrapToken ? nil : ChannelConfig(channelId: channelID),
+            channel: ChannelConfig(channelId: channelID),
             // Optional host-app settings:
             // theme: ThemeConfig(messageTimestampFormat: "EE, MMM dd yyyy 'at' hh:mm:ss a"),
             // debug: DebugConfig(enabled: true, logLevel: "debug", logWebsocketMessages: true, printLogs: true),
             // features: FeaturesConfig(sendAllDeepLink: true)
         )
+    }
+
+    @MainActor
+    private func prepareAuthentication() async {
+        guard isGeneratingBootstrapToken else {
+            bootstrapToken = nil
+            bootstrapConfiguration = nil
+            isPreparingAuthentication = false
+            return
+        }
+
+        defer { isPreparingAuthentication = false }
+
+        do {
+            let generatedConfiguration = try await CustomerSessionBootstrapProvider.makeSDKConfigurationFromEnvironment(
+                environment: sdkEnvironment,
+                projectID: projectID,
+                endpoint: endpoint,
+                tenantID: tenantID,
+                channelSecret: channelSecret,
+                verifiedUserID: verifiedUserID,
+                channelID: channelID,
+                channelName: chatTitle,
+                customAttributes: customerSessionCustomAttributes
+            )
+            bootstrapToken = generatedConfiguration.connection.bootstrapToken
+            bootstrapConfiguration = generatedConfiguration
+        } catch {
+            bootstrapToken = nil
+            bootstrapConfiguration = nil
+            print("Bootstrap token generation failed; using API Key Authentication: \(error.localizedDescription)")
+        }
     }
 
     private var exampleTemplateRegistry: RichTemplateRegistry {
