@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if canImport(UIKit)
+    import UIKit
+#endif
+
 #if canImport(ArtemisSocketSDK)
     import ArtemisSocketSDK
 #endif
@@ -106,16 +110,23 @@ struct ChartRichTemplate: View {
         }
         .overlay {
             GeometryReader { proxy in
+#if canImport(UIKit)
+                ChartPointTapRecognizer { location in
+                    let index = pointIndex(at: location, size: proxy.size)
+                    selectedIndex = selectedIndex == index ? nil : index
+                }
+                .accessibilityHidden(true)
+#else
                 Color.clear.contentShape(Rectangle())
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0).onEnded { event in
-                            // A scroll over a chart must continue scrolling the transcript/plot.
                             guard abs(event.translation.width) < 8, abs(event.translation.height) < 8 else { return }
                             let index = pointIndex(at: event.location, size: proxy.size)
                             selectedIndex = selectedIndex == index ? nil : index
                         }
                     )
                     .accessibilityHidden(true)
+#endif
             }
         }
     }
@@ -221,3 +232,53 @@ struct ChartRichTemplate: View {
         return min(max(0, index), data.count - 1)
     }
 }
+
+#if canImport(UIKit)
+/// A tap recognizer that allows scroll-view pan gestures to recognize alongside it.
+/// Swipes fail the tap recognizer naturally, leaving vertical chat and horizontal chart scrolling intact.
+private struct ChartPointTapRecognizer: UIViewRepresentable {
+    let onTap: (CGPoint) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.didTap(_:)))
+        tap.delegate = context.coordinator
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onTap = onTap
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onTap: (CGPoint) -> Void
+
+        init(onTap: @escaping (CGPoint) -> Void) {
+            self.onTap = onTap
+        }
+
+        @objc func didTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            onTap(gesture.location(in: view))
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+}
+#endif
