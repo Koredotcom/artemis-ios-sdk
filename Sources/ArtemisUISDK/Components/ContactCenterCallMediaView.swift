@@ -10,6 +10,8 @@ import WebKit
 enum ContactCenterMediaEvent {
     case ready
     case connected
+    case localStream(callId: String?, callType: String?)
+    case remoteStream(callId: String?, callType: String?)
     case terminated(String?)
     case failed(String)
 }
@@ -204,6 +206,10 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
             resumeReadiness()
             emit(.ready)
         case "connected": emit(.connected)
+        case "local_stream": emit(.localStream(
+            callId: body["callId"] as? String, callType: body["callType"] as? String))
+        case "remote_stream": emit(.remoteStream(
+            callId: body["callId"] as? String, callType: body["callType"] as? String))
         case "terminated": emit(.terminated(body["reason"] as? String))
         case "error": emit(.failed(body["message"] as? String ?? "The call could not connect"))
         default: break
@@ -411,7 +417,7 @@ final class ContactCenterCallMediaController: NSObject, WKScriptMessageHandler, 
                     loginStateChanged: (_loggedIn, cause) => { if (cause === 'login' || cause === 'connected') loginResolve(); if (cause === 'login failed') loginReject(new Error('AudioCodes login failed')); },
                     callConfirmed: () => post('connected'),
                     callTerminated: (_call, _message, cause) => { activeCall = null; if (!stopping) post('terminated', {reason: typeof cause === 'string' ? cause : undefined}); },
-                    callShowStreams: (_call, localStream, remoteStream) => { if (localStream instanceof MediaStream) { local.srcObject = localStream; local.hidden = input.callType !== 'video'; } if (remoteStream instanceof MediaStream) { remote.srcObject = remoteStream; } },
+                    callShowStreams: (_call, localStream, remoteStream) => { if (localStream instanceof MediaStream) { local.srcObject = localStream; local.hidden = input.callType !== 'video'; post('local_stream', {callId:input.callId, callType:input.callType}); } if (remoteStream instanceof MediaStream) { remote.srcObject = remoteStream; post('remote_stream', {callId:input.callId, callType:input.callType}); } },
                     outgoingCallProgress: () => {}, incomingCall: (call) => call && call.reject && call.reject(),
                     callHoldStateChanged: () => {}, callScreenSharingEnded: () => {}
                   });

@@ -57,7 +57,7 @@ public struct AgentChatView: View {
         environment: String? = nil, configResource: String = "sdk_configurations",
         runtimeUserContext: SDKUserContext? = nil, headerBuilder: ChatHeaderBuilder? = nil,
         footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
-        uiOptions: ChatUIOptions? = nil, onEvent: AgentChatEventHandler? = nil,
+        uiOptions: ChatUIOptions? = nil, onEvent: ArtemisUiListener? = nil,
         onClose: (() -> Void)? = nil
     ) {
         let model = AgentChatViewModel(
@@ -65,7 +65,7 @@ public struct AgentChatView: View {
             runtimeUserContext: runtimeUserContext, headerBuilder: headerBuilder,
             footerBuilder: footerBuilder, templateRegistry: templateRegistry,
             appearance: uiOptions?.appearance ?? .light)
-        model.eventHandler = onEvent
+        model.uiEventHandler = onEvent
         _model = StateObject(wrappedValue: model)
         self.title = title
         self.fonts = fonts
@@ -390,28 +390,25 @@ public struct AgentChatView: View {
     }
     private func performCloseChat() {
         dismissChatKeyboard()
-        model.emitHostEvent(
-            AgentChatEvent(
-                eventCode: "BotClosed", eventMessage: "Bot closed by the user", eventReason: 3))
         if let handle = handle {
             handle.endSession()
         } else {
+            model.emitUiEvent(.sessionEnded(reason: "END_SESSION"))
+            model.emitUiEvent(.closed(reason: "END_SESSION"))
             model.stop(endingSession: true)
         }
         (onClose ?? { dismiss() })()
     }
-    private func emitDeepLinkAndMinimize(_ url: String) {
-        model.emitHostEvent(
-            AgentChatEvent(eventCode: "DeepLinkClicked", eventMessage: url, eventReason: 5))
+    private func emitDeepLinkAndMinimize(
+        _ url: String, title: String? = nil, messageId: String? = nil
+    ) {
+        model.emitUiEvent(.deepLinkClicked(url: url, title: title, messageId: messageId))
         handle?.minimize()
         (onClose ?? { dismiss() })()
     }
     private var minimizeChat: () -> Void {
         {
             guard handle != nil else { return }
-            model.emitHostEvent(
-                AgentChatEvent(
-                    eventCode: "BotMinimized", eventMessage: "Bot minimized by the user", eventReason: 4))
             handle?.minimize()
             (onClose ?? { dismiss() })()
         }
@@ -563,7 +560,7 @@ struct MessageBubble: View {
     var sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil
     var sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil
     var deepLinkBaseURL: String? = nil
-    var onInternalDeepLink: ((String) -> Void)? = nil
+    var onInternalDeepLink: ((String, String?, String?) -> Void)? = nil
     var presentation: ChatPresentationState? = nil
     var showCitations = true
     var showAgentLinks = false
@@ -793,7 +790,7 @@ struct MessageBubble: View {
             message: message, theme: theme, accentColor: Color(hexString: theme?.primaryColor),
             submitAction: onSubmitAction, submitFeedback: onSubmitFeedback, performAction: performAction,
             sendFeedback: sendFeedback, sendRichFeedback: sendRichFeedback, presentation: presentation,
-            deepLinkBaseURL: deepLinkBaseURL, onInternalDeepLink: onInternalDeepLink)
+            deepLinkBaseURL: deepLinkBaseURL, onInternalDeepLinkDetails: onInternalDeepLink)
     }
 }
 

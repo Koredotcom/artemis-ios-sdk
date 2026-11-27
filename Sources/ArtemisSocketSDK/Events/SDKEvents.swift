@@ -78,9 +78,19 @@ public enum ChatEvent: Sendable {
     case typingIndicator(isTyping: Bool)
     case thought(content: String)
     case activity(text: String?)
+    case statusUpdate(text: String, operation: String, fillerId: String?, turnId: String?)
+    case idleTimeout(timeoutMs: Int64, behavior: String)
     case responseCancelled(messageId: String?, reason: String)
     case agentTransferChanged(AgentTransferStatus)
     case agentTransferLifecycle(AgentTransferLifecycleEvent)
+    case agentPresence(sessionId: String, eventType: String, payload: [String: AnySendable], timestamp: Date)
+    case initialAssistantMessageStatus(
+        source: String?, expected: Bool, pending: Bool, rendered: Bool, failed: Bool)
+    case authorizationEvent(payload: [String: AnySendable])
+    case hostSignal(payload: [String: AnySendable])
+    case feedbackAcknowledgement(payload: [String: AnySendable])
+    case agentTransferSurveyAcknowledgement(payload: [String: AnySendable])
+    case sessionEnded(reason: String?)
     case error(error: Error)
 }
 

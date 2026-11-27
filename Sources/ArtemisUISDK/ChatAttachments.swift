@@ -143,7 +143,9 @@ public struct AttachmentDraft: Identifiable, Sendable {
         var seen = Set(attachmentDrafts.map { $0.source.standardizedFileURL })
         let additions = urls.filter { seen.insert($0.standardizedFileURL).inserted }
         guard additions.count + attachmentDrafts.count <= AttachmentConfig.maxFilesPerMessage else {
-            errorMessage = strings("You can attach up to five files per message.")
+            let message = strings("You can attach up to five files per message.")
+            errorMessage = message
+            emitUiEvent(.error(code: "ATTACHMENT_LIMIT", message: message, recoverable: false))
             if removeTemporaryFiles { urls.forEach(Self.removePickerFile) }
             return
         }
@@ -272,10 +274,18 @@ public struct AttachmentDraft: Identifiable, Sendable {
                     id: id, filename: draft.source.lastPathComponent, mimeType: mime, sizeBytes: size)
                 self.attachmentDrafts[i].status = .ready
                 self.attachmentDrafts[i].progress = 1
+                self.emitUiEvent(.attachmentUploaded(
+                    attachmentId: id, filename: draft.source.lastPathComponent))
             } catch {
                 guard let i = self.currentDraft(draft) else { return }
                 self.attachmentDrafts[i].status = Task.isCancelled ? .cancelled : .failed
                 self.attachmentDrafts[i].error = Task.isCancelled ? nil : error.localizedDescription
+                if !Task.isCancelled {
+                    let filename = draft.source.lastPathComponent
+                    self.emitUiEvent(.attachmentError(filename: filename, error: error.localizedDescription))
+                    self.emitUiEvent(.error(
+                        code: "ATTACHMENT_UPLOAD", message: error.localizedDescription, recoverable: true))
+                }
                 if let error = error as? AttachmentError, error.status == 404 || error.status == 405 {
                     self.attachmentsUnavailable = true
                     self.attachmentsAllowed = false

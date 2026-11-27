@@ -417,18 +417,32 @@ A `RichTemplateRenderer` provides a `matches(message)` predicate and a SwiftUI `
 | `AgentChatHandle.close()` | Release the chat UI resources; session behavior follows `SessionConfig.endSessionOnClose`. |
 | `AgentChatHandle.endSession()` | Explicitly end the Runtime session and close the retained UI. |
 
-Presentation methods accept `title`, `fonts`, `headerBuilder`, `footerBuilder`, `templateRegistry`, `uiOptions`, and an event callback where applicable. The UIKit push method also accepts `hidesBottomBarWhenPushed` and `animated`.
+Presentation methods accept `title`, `fonts`, `headerBuilder`, `footerBuilder`, `templateRegistry`, `uiOptions`, and a typed `ArtemisUiEvent` callback where applicable. The UIKit push method also accepts `hidesBottomBarWhenPushed` and `animated`.
 
-### UI lifecycle events
+### UI events
 
-Pass `onEvent` when constructing the view or handle, or assign it to `handle.onEvent` before presenting. Events are delivered on the main actor as `AgentChatEvent` with `eventCode`, `eventMessage`, and `eventReason`:
+Pass `onEvent` when constructing a view or handle, or assign it to `handle.onEvent`. For multiple retained-handle observers, use `addListener` and keep its registration if you need to cancel it. Events are delivered on the main actor as `ArtemisUiEvent`:
 
-| Event | Reason | Meaning |
-| --- | ---: | --- |
-| `BotConnectionStatus` | 1 | Connected. |
-| `BotConnectionStatus` | 2 | Disconnected after a successful connection. |
-| `BotClosed` | 3 | User closed the chat. |
-| `BotMinimized` | 4 | User minimized the retained chat. |
+```swift
+let handle = AgentChatUI.initialize(configuration: configuration)
+let eventRegistration = handle.addListener { event in
+    switch event {
+    case .deepLinkClicked(let url, let title, let messageId):
+        print("Deep link tapped:", url, title ?? "", messageId ?? "")
+    case .messageSent(let messageId):
+        print("Message accepted:", messageId)
+    case .connectionChanged(let status, let detail):
+        print("Chat connection:", status, detail ?? "")
+    default:
+        break
+    }
+}
+
+// When the listener is no longer needed:
+eventRegistration.cancel()
+```
+
+`ArtemisUiEvent` includes transcript and streaming changes, typing and status, session and connection lifecycle, upload and feedback acknowledgements, agent transfer and auth signals, contact-center call state, deep links, minimize, and close events. For a retained handle, `addListener` supports multiple observers and returns a registration token that can be cancelled.
 
 ### Direct transport API
 

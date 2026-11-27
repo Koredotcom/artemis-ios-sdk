@@ -71,15 +71,23 @@ AgentChatUI.show(in: self, handle: chatHandle, title: "Support")
 ```
 
 Register `onEvent` when creating a handle, or assign `chatHandle.onEvent` before
-opening chat. The callback receives `AgentChatEvent` on the main thread. Its
-`eventCode`, `eventMessage`, and `eventReason` properties encode as
-`event_code`, `event_message`, and `event_reason`:
+opening chat. The callback receives typed `ArtemisUiEvent` values on the main
+actor:
 
 ```swift
 private lazy var chatHandle = AgentChatUI.initialize(
     configuration: configuration,
     onEvent: { event in
-        print(event.eventCode, event.eventMessage, event.eventReason)
+        switch event {
+        case .connectionChanged(let status, let detail):
+            print("Connection:", status, detail ?? "")
+        case .messageSent(let messageId):
+            print("Message accepted:", messageId)
+        case .deepLinkClicked(let url, let title, let messageId):
+            print("Deep link:", url, title ?? "", messageId ?? "")
+        default:
+            break
+        }
     }
 )
 ```

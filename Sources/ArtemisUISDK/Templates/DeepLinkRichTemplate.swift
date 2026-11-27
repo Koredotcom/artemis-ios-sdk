@@ -40,7 +40,9 @@ struct DeepLinkRichTemplate: View {
                 Button {
                     switch link.element.navigation {
                     case .internalLink:
-                        if let onInternalDeepLink = context.onInternalDeepLink {
+                        if let onInternalDeepLink = context.onInternalDeepLinkDetails {
+                            onInternalDeepLink(link.element.url, link.element.title, context.message.id)
+                        } else if let onInternalDeepLink = context.onInternalDeepLink {
                             onInternalDeepLink(link.element.url)
                         } else {
                             openURL(link.url)

@@ -18,30 +18,6 @@ import SwiftUI
     import UIKit
 #endif
 
-/// A lifecycle event reported by the chat UI SDK to the hosting application.
-///
-/// The coding keys match the event payload format used by host integrations.
-public struct AgentChatEvent: Codable, Equatable, Sendable {
-    public let eventCode: String
-    public let eventMessage: String
-    public let eventReason: Int
-
-    public init(eventCode: String, eventMessage: String, eventReason: Int) {
-        self.eventCode = eventCode
-        self.eventMessage = eventMessage
-        self.eventReason = eventReason
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case eventCode = "event_code"
-        case eventMessage = "event_message"
-        case eventReason = "event_reason"
-    }
-}
-
-/// Receives chat lifecycle events on the main actor.
-public typealias AgentChatEventHandler = (AgentChatEvent) -> Void
-
 public struct ChatHeaderContext {
     public let title: String
     public let theme: ChatTheme?
@@ -129,6 +105,7 @@ public struct RichTemplateContext {
     public let presentation: ChatPresentationState?
     public let deepLinkBaseURL: String?
     public let onInternalDeepLink: ((String) -> Void)?
+    public let onInternalDeepLinkDetails: ((String, String?, String?) -> Void)?
     public let submitFeedback:
         (_ messageId: String, _ ratingType: String, _ ratingValue: Int, _ actionRenderId: String?) ->
             Void
@@ -141,7 +118,8 @@ public struct RichTemplateContext {
         sendFeedback: ((String, String, Int, String?) async throws -> Void)? = nil,
         sendRichFeedback: ((String, String, Int, String?, Int?, String?) async throws -> Void)? = nil,
         presentation: ChatPresentationState? = nil, deepLinkBaseURL: String? = nil,
-        onInternalDeepLink: ((String) -> Void)? = nil
+        onInternalDeepLink: ((String) -> Void)? = nil,
+        onInternalDeepLinkDetails: ((String, String?, String?) -> Void)? = nil
     ) {
         self.message = message
         self.theme = theme
@@ -154,6 +132,7 @@ public struct RichTemplateContext {
         self.presentation = presentation
         self.deepLinkBaseURL = deepLinkBaseURL
         self.onInternalDeepLink = onInternalDeepLink
+        self.onInternalDeepLinkDetails = onInternalDeepLinkDetails
     }
 }
 
@@ -345,7 +324,7 @@ public enum AgentChatUI {
         environment: String? = nil, configResource: String = "sdk_configurations",
         runtimeUserContext: SDKUserContext? = nil, headerBuilder: ChatHeaderBuilder? = nil,
         footerBuilder: ChatFooterBuilder? = nil, templateRegistry: RichTemplateRegistry? = nil,
-        uiOptions: ChatUIOptions? = nil, onEvent: AgentChatEventHandler? = nil,
+        uiOptions: ChatUIOptions? = nil, onEvent: ArtemisUiListener? = nil,
         onClose: (() -> Void)? = nil
     ) -> AgentChatView {
         AgentChatView(
@@ -367,7 +346,7 @@ public enum AgentChatUI {
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
             templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
             hidesBottomBarWhenPushed: Bool = true, animated: Bool = true,
-            onEvent: AgentChatEventHandler? = nil
+            onEvent: ArtemisUiListener? = nil
         ) -> Bool {
             guard
                 let navigationController = (controller as? UINavigationController)
@@ -401,7 +380,7 @@ public enum AgentChatUI {
             configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
             headerBuilder: ChatHeaderBuilder? = nil, footerBuilder: ChatFooterBuilder? = nil,
             templateRegistry: RichTemplateRegistry? = nil, uiOptions: ChatUIOptions? = nil,
-            onEvent: AgentChatEventHandler? = nil
+            onEvent: ArtemisUiListener? = nil
         ) {
             let chat = view(
                 configuration: configuration, title: title, fonts: fonts, environment: environment,
@@ -463,6 +442,8 @@ public enum AgentChatUI {
         private var contactCenterCapabilities: ContactCenterSessionCapabilities?
         private var contactCenterSbcDetails: ContactCenterSbcDetails?
         private var contactCenterSbcRequestId: String?
+        private var contactCenterEndpoint: ContactCenterCallEndpoint?
+        private var reportedContactCenterEndedCallIds = Set<String>()
         private var pendingAcceptedCallId: String?
         private var releasedCallParts: [String: ReleasedContactCenterCall] = [:]
         private var endpointReleaseCallId: String?
@@ -498,8 +479,8 @@ public enum AgentChatUI {
     @Published public internal(set) var isSending = false
     @Published public internal(set) var attachmentsAllowed = false
     @Published var sentAttachments: [String: [ChatAttachment]] = [:]
-    var eventHandler: AgentChatEventHandler?
-    private var hasActiveConnection = false
+    var uiEventHandler: ArtemisUiListener?
+    private var lastUiTypingState = false
     public private(set) var sdk: AgentSDK?
     public let presentation = ChatPresentationState()
     var attachmentSessionId: String?
@@ -596,6 +577,9 @@ public enum AgentChatUI {
                     pendingAcceptedCallId = nil
                     contactCenterError = error.localizedDescription
                     contactCenterCallStatus = .error
+                    emitUiEvent(.contactCenterStateChanged(
+                        state: "error", reason: error.localizedDescription, callId: call.callId))
+                    emitUiEvent(.contactCenterError(message: error.localizedDescription))
                 }
             }
         }
@@ -617,6 +601,8 @@ public enum AgentChatUI {
                 guard contactCenterCall?.callId == call.callId, contactCenterCallStatus == .declining else {
                     return
                 }
+                emitUiEvent(.contactCenterCallRejected(callId: call.callId, reason: "user_rejected"))
+                emitContactCenterEnded(callId: call.callId, reason: "user_rejected")
                 resetContactCenterCall(status: .idle)
             } catch {
                 guard contactCenterCall?.callId == call.callId, contactCenterCallStatus == .declining else {
@@ -624,12 +610,14 @@ public enum AgentChatUI {
                 }
                 contactCenterError = error.localizedDescription
                 contactCenterCallStatus = previousStatus
+                emitUiEvent(.contactCenterError(message: error.localizedDescription))
             }
         }
 
         func endContactCenterCall() {
             guard let call = contactCenterCall else { return }
             try? sdk?.respondToContactCenterCall(.terminated, call: call, reason: "user_ended")
+            emitContactCenterEnded(callId: call.callId, reason: "user_ended")
             resetContactCenterCall(status: .idle)
         }
 
@@ -656,21 +644,37 @@ public enum AgentChatUI {
             switch event {
             case .capabilities(let capabilities):
                 contactCenterCapabilities = capabilities
+                if contactCenterEnabled && (!capabilities.enabled || !capabilities.sbcDetails) {
+                    let reason = capabilities.disabledReason
+                        ?? "Contact Center calls are not enabled for this session."
+                    emitUiEvent(.contactCenterStateChanged(state: "unsupported", reason: reason))
+                    emitUiEvent(.contactCenterUnsupported(reason: reason, capabilities: capabilities))
+                }
                 guard contactCenterEnabled, capabilities.enabled, capabilities.sbcDetails,
                     contactCenterSbcRequestId == nil, let sdk
                 else { return }
+                emitUiEvent(.contactCenterStateChanged(state: "sbc_pending"))
                 do { contactCenterSbcRequestId = try sdk.requestContactCenterSbcDetails() }
-                catch { contactCenterError = error.localizedDescription }
+                catch {
+                    contactCenterError = error.localizedDescription
+                    emitUiEvent(.contactCenterError(message: error.localizedDescription))
+                }
 
             case .sbcDetails(let requestId, let ready, let details):
                 if let requestId, requestId != contactCenterSbcRequestId { return }
                 if let details {
                     contactCenterSbcDetails = details
+                    emitUiEvent(.agentMediaSbcDetailsChanged(details))
+                    emitUiEvent(.contactCenterStateChanged(state: "ready"))
+                    emitUiEvent(.contactCenterReady(details))
                     sbcDetailsTimeout?.cancel()
                     sbcDetailsTimeout = nil
                     sbcDetailsContinuation?.resume(returning: details)
                     sbcDetailsContinuation = nil
                 } else if ready {
+                    emitUiEvent(.contactCenterStateChanged(
+                        state: "unsupported", reason: "SBC details are unavailable"))
+                    emitUiEvent(.contactCenterUnsupported(reason: "SBC details are unavailable"))
                     failSbcDetailsWait(ContactCenterCallSetupError.sbcUnavailable)
                 }
 
@@ -679,7 +683,15 @@ public enum AgentChatUI {
                 if let existing = contactCenterCall, contactCenterCallStatus != .idle,
                     existing.callId != call.callId
                 { return }
+                reportedContactCenterEndedCallIds.remove(call.callId)
                 contactCenterCall = call
+                emitUiEvent(.contactCenterStateChanged(state: "incoming", callId: call.callId))
+                emitUiEvent(.contactCenterIncomingCall(call))
+                emitUiEvent(.agentMediaInvite(
+                    callType: call.callType.rawValue, conversationId: call.conversationId,
+                    providerConversationId: call.providerConversationId, providerAccountId: nil,
+                    mediaSessionId: call.mediaSessionId, idempotencyKey: nil,
+                    callId: call.callId, displayName: call.displayName))
                 contactCenterError = nil
                 isContactCenterMuted = false
                 isContactCenterCameraEnabled = true
@@ -689,14 +701,24 @@ public enum AgentChatUI {
                     contactCenterError = contactCenterCapabilities?.disabledReason
                         ?? "Contact Center calls are not enabled for this session."
                     contactCenterCallStatus = .unavailable
+                    emitUiEvent(.contactCenterUnsupported(
+                        reason: contactCenterError ?? "Contact Center calls are not enabled for this session.",
+                        capabilities: contactCenterCapabilities))
                 } else if call.callType == .video, contactCenterCapabilities?.agentVideo == false {
                     contactCenterError = "Video calling is not enabled for this session."
                     contactCenterCallStatus = .unavailable
+                    emitUiEvent(.contactCenterUnsupported(
+                        reason: contactCenterError ?? "Video calling is not enabled for this session.",
+                        capabilities: contactCenterCapabilities))
                 } else {
                     contactCenterCallStatus = .incoming
                 }
 
             case .endpointReleased(let callId, let endpoint, let customer):
+                contactCenterEndpoint = endpoint
+                emitUiEvent(.contactCenterStateChanged(state: "connecting", callId: callId))
+                emitUiEvent(.agentMediaEndpointReleased(
+                    callId: callId, endpoint: endpoint, customer: customer))
                 guard pendingAcceptedCallId == callId else { return }
                 let released = ReleasedContactCenterCall(endpoint: endpoint, customer: customer)
                 if endpointReleaseCallId == callId, let continuation = endpointReleaseContinuation {
@@ -710,6 +732,7 @@ public enum AgentChatUI {
                 }
 
             case .callTerminated(let callId, let reason):
+                emitContactCenterEnded(callId: callId, reason: reason)
                 guard let call = contactCenterCall,
                     callId == nil || callId == call.callId
                 else { return }
@@ -731,7 +754,20 @@ public enum AgentChatUI {
                 case .ready: break
                 case .connected:
                     self.contactCenterCallStatus = .inCall
-                case .terminated:
+                    if let call = self.contactCenterCall {
+                        self.emitUiEvent(.contactCenterCallAccepted(
+                            callId: call.callId, callType: call.callType.rawValue,
+                            endpoint: self.contactCenterEndpoint))
+                        self.emitUiEvent(.contactCenterStateChanged(
+                            state: "in_call", callId: call.callId))
+                    }
+                case .localStream(let callId, let callType):
+                    self.emitUiEvent(.contactCenterLocalStream(callId: callId, callType: callType))
+                case .remoteStream(let callId, let callType):
+                    self.emitUiEvent(.contactCenterRemoteStream(callId: callId, callType: callType))
+                case .terminated(let reason):
+                    let callId = self.contactCenterCall?.callId
+                    self.emitContactCenterEnded(callId: callId, reason: reason)
                     self.resetContactCenterCall(status: .idle)
                 case .failed(let message):
                     if let call = self.contactCenterCall,
@@ -741,10 +777,21 @@ public enum AgentChatUI {
                     }
                     self.contactCenterError = message
                     self.resetContactCenterCall(status: .error, keepCall: true)
+                    self.emitUiEvent(.contactCenterStateChanged(
+                        state: "error", reason: message, callId: self.contactCenterCall?.callId))
+                    self.emitUiEvent(.contactCenterError(message: message))
                 }
             }
             contactCenterMediaController = controller
             return controller
+        }
+
+        private func emitContactCenterEnded(callId: String?, reason: String?) {
+            if let callId, !reportedContactCenterEndedCallIds.insert(callId).inserted { return }
+            if reportedContactCenterEndedCallIds.count > 100 { reportedContactCenterEndedCallIds.removeAll() }
+            emitUiEvent(.contactCenterStateChanged(state: "ended", reason: reason, callId: callId))
+            emitUiEvent(.contactCenterCallEnded(callId: callId, reason: reason))
+            emitUiEvent(.agentMediaCallTerminated(callId: callId, reason: reason))
         }
 
         private func waitForEndpointRelease(callId: String) async throws -> ReleasedContactCenterCall {
@@ -822,6 +869,7 @@ public enum AgentChatUI {
             sbcDetailsContinuation = nil
             releasedCallParts.removeAll()
             pendingAcceptedCallId = nil
+            contactCenterEndpoint = nil
             contactCenterMediaController?.stopCall()
             contactCenterMediaController = nil
             contactCenterCallStatus = status
@@ -927,6 +975,7 @@ public enum AgentChatUI {
     }
     private func connect(_ sdk: AgentSDK) {
         status = .connecting
+        emitUiEvent(.connectionChanged(status: "CONNECTING"))
         connectionTask = Task { [weak self, weak sdk] in
             guard let self, let sdk else { return }
             defer { self.connectionTask = nil }
@@ -977,6 +1026,7 @@ public enum AgentChatUI {
                 )
                 guard self.sdk === sdk else { return }
                 self.sentAttachments[id] = attachments
+                self.emitUiEvent(.messageSent(messageId: id))
                 if self.composeText == sentDraft {
                     self.composeText = ""
                 }
@@ -985,7 +1035,11 @@ public enum AgentChatUI {
                 if self.composeText.isEmpty {
                     try? sdk.sendUserPresence(isTyping: false)
                 }
-            } catch { self.errorMessage = strings(error.localizedDescription) }
+            } catch {
+                self.errorMessage = strings(error.localizedDescription)
+                self.emitUiEvent(.error(
+                    code: "SEND_REJECTED", message: error.localizedDescription, recoverable: true))
+            }
         }
     }
     public func composerChanged() {
@@ -1016,8 +1070,13 @@ public enum AgentChatUI {
         displayText: String? = nil
     ) async throws {
         guard let sdk else { throw AgentSDKError.notConnected }
-        try await sdk.performAction(
-            actionId, value: value, formData: formData, renderId: renderId, displayText: displayText)
+        do {
+            try await sdk.performAction(
+                actionId, value: value, formData: formData, renderId: renderId, displayText: displayText)
+        } catch {
+            emitUiEvent(.error(code: "SEND_REJECTED", message: error.localizedDescription, recoverable: true))
+            throw error
+        }
         messages = sdk.getMessages()
         scrollToBottomRequest &+= 1
     }
@@ -1033,9 +1092,9 @@ public enum AgentChatUI {
         }
     }
     public func sendMessageFeedback(_ messageId: String, rating: Int, comment: String?) async throws {
-        guard let sdk else { throw AgentSDKError.notConnected }
-        _ = try await sdk.submitFeedback(
-            messageId: messageId, ratingType: "thumbs", ratingValue: rating, feedbackText: comment)
+        try await sendFeedback(
+            messageId, ratingType: "thumbs", ratingValue: rating, actionRenderId: nil,
+            feedbackText: comment)
     }
     public func sendFeedback(
         _ messageId: String, ratingType: String, ratingValue: Int, actionRenderId: String?,
@@ -1044,10 +1103,18 @@ public enum AgentChatUI {
         async throws
     {
         guard let sdk else { throw AgentSDKError.notConnected }
-        _ = try await sdk.submitFeedback(
-            messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
-            feedbackText: feedbackText, actionRenderId: actionRenderId,
-            followUpRating: followUpRating, followUpText: followUpText)
+        do {
+            _ = try await sdk.submitFeedback(
+                messageId: messageId, ratingType: ratingType, ratingValue: ratingValue,
+                feedbackText: feedbackText, actionRenderId: actionRenderId,
+                followUpRating: followUpRating, followUpText: followUpText)
+        } catch {
+            let feedbackError = error as? FeedbackSubmitError
+            emitUiEvent(.error(
+                code: feedbackError?.code ?? "FEEDBACK_REJECTED",
+                message: feedbackError?.message ?? error.localizedDescription, recoverable: true))
+            throw error
+        }
     }
     func surveyPresentation(for message: Message) -> SurveyPresentation {
         if let existing = surveys[message.id] { return existing }
@@ -1069,7 +1136,13 @@ public enum AgentChatUI {
                 _ = try await sdk.submitAgentTransferSurvey(survey, score: score, comments: state.comments)
                 guard self.sdk === sdk, sdk.getSessionId() == session else { return }
                 state.status = .submitted
-            } catch { state.status = .failed }
+            } catch {
+                state.status = .failed
+                let feedbackError = error as? FeedbackSubmitError
+                self.emitUiEvent(.error(
+                    code: feedbackError?.code ?? "SURVEY_REJECTED",
+                    message: feedbackError?.message ?? error.localizedDescription, recoverable: true))
+            }
         }
     }
     public func reconnect() {
@@ -1138,13 +1211,12 @@ public enum AgentChatUI {
             systemDarkMode: systemDarkMode, appearance: appearance)
         updateAttachmentPolicy(sdk.getSessionScope())
     }
-    func emitHostEvent(_ event: AgentChatEvent) {
-        eventHandler?(event)
+    func emitUiEvent(_ event: ArtemisUiEvent) {
+        uiEventHandler?(event)
     }
     private func handle(_ event: SDKEvent) {
         switch event {
         case .connected(let id):
-            hasActiveConnection = true
             if let previous = attachmentSessionId, previous != id {
                 resetAttachments()
                 surveys.removeAll()
@@ -1156,57 +1228,215 @@ public enum AgentChatUI {
             status = .connected
             errorMessage = nil
             updatePolicy()
-            emitHostEvent(
-                AgentChatEvent(
-                    eventCode: "BotConnectionStatus",
-                    eventMessage: "Bot connected successfully",
-                    eventReason: 1))
+            emitUiEvent(.connectionChanged(status: "CONNECTED"))
+            emitUiEvent(.sessionStarted(sessionId: id, scope: sdk?.getSessionScope()))
         case .sessionScopeChanged: updatePolicy()
-        case .reconnecting:
+        case .reconnecting(let attempt, let maxAttempts):
             status = .connecting
             cancelAllUploads()
-        case .disconnected:
-            let wasConnected = hasActiveConnection
-            hasActiveConnection = false
+            emitUiEvent(.connectionChanged(
+                status: "CONNECTING", detail: "Reconnecting (\(attempt)/\(maxAttempts))"))
+        case .disconnected(let reason):
             status = .notConnected
             isTyping = false
+            emitTypingUiEvent(false)
             cancelAllUploads()
             #if os(iOS)
                 contactCenterCapabilities = nil
                 contactCenterSbcDetails = nil
                 contactCenterSbcRequestId = nil
                 resetContactCenterCall(status: .idle)
+                emitUiEvent(.contactCenterStateChanged(state: "disabled", reason: reason))
             #endif
-            if wasConnected {
-                emitHostEvent(
-                    AgentChatEvent(
-                        eventCode: "BotConnectionStatus",
-                        eventMessage: "Bot disconnected successfully",
-                        eventReason: 2))
-            }
+            emitUiEvent(.connectionChanged(status: "DISCONNECTED", detail: reason))
         case .error(let error, let code):
             if code != .historyFetch { errorMessage = strings(error.localizedDescription) }
             if sdk?.isConnected() != true { status = .notConnected }
+            guard code != .sendFailed else { return }
+            emitUiEvent(.error(
+                code: code.rawValue.uppercased(), message: error.localizedDescription, recoverable: true))
         default: break
         }
     }
     private func handle(_ event: ChatEvent) {
         messages = sdk?.getMessages() ?? messages
         switch event {
-        case .typingIndicator(let value): isTyping = value
-        case .activity(let text): activityText = text
-        case .agentTransferChanged(let state): transferStatus = state
-        case .messageChunk:
+        case .messageReceived(let message):
+            guard message.status != .streaming else { break }
+            emitUiEvent(.message(message))
+            emitUiEvent(.messageChanged(messageId: message.id, role: message.role.rawValue))
+        case .historyLoaded(let messages):
+            emitUiEvent(.messagesReplaced(messages))
+        case .messageChunk(let id, let chunk):
             scrollToBottomRequest &+= 1
+            emitUiEvent(.messageChunk(messageId: id, chunk: chunk))
+        case .typingIndicator(let value):
+            isTyping = value
+            emitTypingUiEvent(value)
+        case .activity(let text):
+            activityText = text
+            if text == nil {
+                emitUiEvent(.statusClear)
+            }
+        case .statusUpdate(let text, let operation, let fillerId, let turnId):
+            activityText = text
+            emitUiEvent(.statusUpdate(
+                text: text, operation: operation, fillerId: fillerId, turnId: turnId))
+        case .idleTimeout(let timeoutMs, let behavior):
+            emitUiEvent(.idleTimeout(timeoutMs: timeoutMs, behavior: behavior))
+        case .thought(let content):
+            emitUiEvent(.statusUpdate(text: content, operation: "thought"))
+        case .agentTransferChanged(let state):
+            transferStatus = state
+            emitUiEvent(.agentTransferChanged(status: state.rawValue.uppercased()))
+        case .agentTransferLifecycle(let lifecycle):
+            emitAgentLifecycle(lifecycle)
         case .messageEnd:
             // Final metadata can add a tall form/table after the last text chunk.
             scrollToBottomRequest &+= 1
             activityText = nil
-        case .responseCancelled:
+        case .responseCancelled(let id, let reason):
             activityText = nil
+            emitUiEvent(.responseCancelled(messageId: id, reason: reason))
+        case .agentPresence(let sessionId, let type, let payload, let timestamp):
+            emitAgentPresence(sessionId: sessionId, type: type, payload: payload, timestamp: timestamp)
+        case .initialAssistantMessageStatus(let source, let expected, let pending, let rendered, let failed):
+            emitUiEvent(.initialAssistantMessageStatus(
+                source: source, expected: expected, pending: pending, rendered: rendered, failed: failed))
+        case .authorizationEvent(let payload):
+            emitAuthorizationEvent(payload)
+        case .hostSignal(let payload):
+            emitHostSignal(payload)
+        case .feedbackAcknowledgement(let payload):
+            emitFeedbackAcknowledgement(payload, survey: false)
+        case .agentTransferSurveyAcknowledgement(let payload):
+            emitFeedbackAcknowledgement(payload, survey: true)
+        case .sessionEnded(let reason):
+            emitUiEvent(.sessionEnded(reason: reason))
         case .error(let error):
             errorMessage = strings(error.localizedDescription)
+            emitUiEvent(.error(code: "RUNTIME", message: error.localizedDescription, recoverable: true))
         default: break
+        }
+    }
+
+    private func emitTypingUiEvent(_ value: Bool) {
+        let visibleTyping = value && activityText == nil
+        guard lastUiTypingState != visibleTyping else { return }
+        lastUiTypingState = visibleTyping
+        emitUiEvent(.typing(isTyping: visibleTyping))
+    }
+
+    private func emitAgentLifecycle(_ lifecycle: AgentTransferLifecycleEvent) {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = fractionalFormatter.date(from: lifecycle.timestamp)
+            ?? ISO8601DateFormatter().date(from: lifecycle.timestamp)
+            ?? .distantPast
+        let timestamp = Int64(date.timeIntervalSince1970 * 1000)
+        switch lifecycle.kind {
+        case .connected:
+            emitUiEvent(.agentConnected(
+                sessionId: lifecycle.sessionId, timestamp: timestamp, transferred: lifecycle.transferred,
+                agentName: lifecycle.agent?.name,
+                agentAvatarUrl: lifecycle.agent?.avatarURL?.absoluteString))
+        case .transferred:
+            emitUiEvent(.agentTransferred(
+                sessionId: lifecycle.sessionId, timestamp: timestamp,
+                initiatedBy: lifecycle.initiatedBy ?? "unknown"))
+        case .disconnected:
+            emitUiEvent(.agentDisconnected(
+                sessionId: lifecycle.sessionId, timestamp: timestamp,
+                reason: lifecycle.reason ?? "unknown"))
+        }
+    }
+
+    private func emitAgentPresence(
+        sessionId: String, type: String, payload: ArtemisUiEventPayload, timestamp: Date
+    ) {
+        let timestampMs = Int64(timestamp.timeIntervalSince1970 * 1000)
+        switch type {
+        case "agent:joined":
+            emitUiEvent(.agentJoined(sessionId: sessionId, payload: payload, timestamp: timestampMs))
+        case "agent:exited":
+            emitUiEvent(.agentExited(sessionId: sessionId, payload: payload, timestamp: timestampMs))
+        case "agent:notice":
+            emitUiEvent(.agentNotice(sessionId: sessionId, payload: payload, timestamp: timestampMs))
+        default: break
+        }
+    }
+
+    private func emitAuthorizationEvent(_ payload: ArtemisUiEventPayload) {
+        let type = payload["type"]?.value as? String ?? ""
+        let sessionId = payload["sessionId"]?.value as? String
+        switch type {
+        case "auth_required", "auth_gate_updated":
+            guard let sessionId else { return }
+            let pending = (payload["pending"]?.value as? [[String: Any]] ?? [])
+                .map { $0.mapValues(AnySendable.init) }
+            let satisfied = (payload["satisfied"]?.value as? [[String: Any]] ?? [])
+                .map { $0.mapValues(AnySendable.init) }
+            emitUiEvent(.authRequired(
+                sessionId: sessionId, pending: pending, satisfied: satisfied, payload: payload))
+        case "auth_challenge":
+            emitUiEvent(.authChallenge(payload: payload))
+        case "auth_gate_satisfied":
+            guard let sessionId else { return }
+            emitUiEvent(.authGateSatisfied(sessionId: sessionId, payload: payload))
+        case "auth_challenge_resolved":
+            guard let sessionId, let toolCallId = payload["toolCallId"]?.value as? String else { return }
+            emitUiEvent(.authChallengeResolved(
+                sessionId: sessionId, toolCallId: toolCallId,
+                outcome: payload["outcome"]?.value as? String, payload: payload))
+        case "message_queued":
+            emitUiEvent(.messageQueued(
+                sessionId: sessionId, reason: payload["reason"]?.value as? String ?? "queued",
+                payload: payload))
+        default: break
+        }
+    }
+
+    private func emitHostSignal(_ payload: ArtemisUiEventPayload) {
+        let event = payload["event"]?.value as? [String: Any] ?? [:]
+        switch payload["type"]?.value as? String {
+        case "auth_token_refreshed":
+            guard let profile = event["profile"] as? String,
+                let reason = event["reason"] as? String,
+                let issuedAt = event["issuedAt"] as? String,
+                let refreshAfter = event["refreshAfter"] as? String
+            else { return }
+            emitUiEvent(.authTokenRefreshed(
+                sessionId: payload["sessionId"]?.value as? String, profile: profile, reason: reason,
+                issuedAt: issuedAt, refreshAfter: refreshAfter))
+        case "auth_context_refresh_requested":
+            guard let profile = event["profile"] as? String,
+                let ticket = event["refreshTicket"] as? String,
+                let expiresAt = event["expiresAt"] as? String
+            else { return }
+            emitUiEvent(.authContextRefreshRequested(
+                sessionId: payload["sessionId"]?.value as? String, profile: profile,
+                refreshTicket: ticket, expiresAt: expiresAt))
+        default: break
+        }
+    }
+
+    private func emitFeedbackAcknowledgement(_ payload: ArtemisUiEventPayload, survey: Bool) {
+        let raw = payload.mapValues(\.value)
+        let error = raw["error"] as? [String: Any] ?? [:]
+        if survey {
+            emitUiEvent(.agentTransferSurveyAck(
+                artemisSessionId: raw["artemisSessionId"] as? String ?? "",
+                success: raw["success"] as? Bool == true,
+                feedbackId: raw["feedbackId"] as? String,
+                errorCode: error["code"] as? String, errorMessage: error["message"] as? String,
+                payload: payload))
+        } else {
+            emitUiEvent(.feedbackAck(
+                messageId: raw["messageId"] as? String ?? "", success: raw["success"] as? Bool == true,
+                feedbackId: raw["feedbackId"] as? String,
+                actionRenderId: raw["actionRenderId"] as? String,
+                errorCode: error["code"] as? String, errorMessage: error["message"] as? String,
+                payload: payload))
         }
     }
 }

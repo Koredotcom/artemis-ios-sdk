@@ -302,6 +302,14 @@ extension ChatClientDelegate {
             if (raw["initialAssistantMessage"] as? [String: Any])?["expected"] as? Bool == true {
                 setTyping(true)
             }
+            let initial = raw["initialAssistantMessage"] as? [String: Any] ?? [:]
+            let initialStatus = initial["status"] as? String
+            emit(.initialAssistantMessageStatus(
+                source: initial["source"] as? String,
+                expected: initial["expected"] as? Bool == true,
+                pending: initial["pending"] as? Bool ?? (initialStatus == "pending" || initial["expected"] as? Bool == true),
+                rendered: initial["rendered"] as? Bool ?? (initialStatus == "rendered"),
+                failed: initial["failed"] as? Bool ?? (initialStatus == "failed")))
         case "response_start":
             guard let id, !cancelled.contains(id) else { return }
             activeResponse = id
@@ -383,6 +391,11 @@ extension ChatClientDelegate {
         case "agent_transfer_event": handleTransfer(raw)
         case "feedback.ack", "agent_transfer_survey.ack":
             let survey = message.type == "agent_transfer_survey.ack"
+            if survey {
+                emit(.agentTransferSurveyAcknowledgement(payload: raw.mapValues(AnySendable.init)))
+            } else {
+                emit(.feedbackAcknowledgement(payload: raw.mapValues(AnySendable.init)))
+            }
             let key =
                 survey
                 ? raw["artemisSessionId"] as? String ?? ""
@@ -398,6 +411,24 @@ extension ChatClientDelegate {
                             code: error["code"] as? String ?? "REJECTED",
                             message: "Feedback could not be submitted. Please retry.")))
             }
+        case "auth_required", "auth_gate_updated", "auth_gate_satisfied", "auth_challenge",
+            "auth_challenge_resolved", "message_queued":
+            emit(.authorizationEvent(payload: raw.mapValues(AnySendable.init)))
+        case "auth_token_refreshed", "auth_context_refresh_requested":
+            emit(.hostSignal(payload: raw.mapValues(AnySendable.init)))
+        case "initial_assistant_message_status":
+            let status = raw["status"] as? String
+            emit(.initialAssistantMessageStatus(
+                source: raw["source"] as? String,
+                expected: raw["expected"] as? Bool ?? true,
+                pending: raw["pending"] as? Bool ?? (status == "pending"),
+                rendered: raw["rendered"] as? Bool ?? (status != "pending" && status != "failed"),
+                failed: raw["failed"] as? Bool ?? (status == "failed")))
+        case "session_end", "session_ended":
+            emit(.sessionEnded(reason: raw["reason"] as? String))
+        case "idle_timeout":
+            let timeoutMs = (raw["timeoutMs"] as? NSNumber)?.int64Value ?? 0
+            emit(.idleTimeout(timeoutMs: timeoutMs, behavior: raw["behavior"] as? String ?? "unknown"))
         case "trace_event":
             let event = raw["event"] as? [String: Any] ?? raw
             let type = MessageNormalizer.string(event, ["type", "eventType"]) ?? ""
@@ -431,7 +462,7 @@ extension ChatClientDelegate {
         let item = messages[index].replacing(
             content: withheld ? "••••" : MessageNormalizer.displayText(text), pendingRender: false)
         messages[index] = item
-        emit(.messageReceived(item))
+        emit(.historyLoaded(messages: messages))
     }
     private func cancelResponse(_ id: String) {
         if !cancelled.contains(id) {
@@ -474,6 +505,11 @@ extension ChatClientDelegate {
             setAgentTyping(event.type == "agent:typing", sessionId: event.sessionId)
             if event.type == "agent:typing" { setTyping(false) }
             return
+        }
+        if ["agent:joined", "agent:exited", "agent:notice"].contains(event.type) {
+            emit(.agentPresence(
+                sessionId: event.sessionId, eventType: event.type,
+                payload: event.data.mapValues(AnySendable.init), timestamp: event.timestamp))
         }
         for item in event.messages {
             guard
@@ -575,6 +611,11 @@ extension ChatClientDelegate {
         if type == "status_update" {
             activityText = text
             emit(.activity(text: text))
+            emit(.statusUpdate(
+                text: text,
+                operation: MessageNormalizer.string(raw, ["operation"]) ?? "general",
+                fillerId: MessageNormalizer.string(raw, ["fillerId"]),
+                turnId: MessageNormalizer.string(raw, ["turnId"])))
             setTyping(true)
         } else {
             var metadata: [String: AnySendable] = [:]

@@ -8,27 +8,59 @@ import SwiftUI
 @MainActor public final class AgentChatHandle: ObservableObject {
     let model: AgentChatViewModel
     @Published public private(set) var isMinimized = false
-    /// Receives connection and user-action events from this chat instance.
-    public var onEvent: AgentChatEventHandler?
+    /// Receives typed UI events from this chat instance.
+    public var onEvent: ArtemisUiListener?
+    private var uiEventListeners: [(id: UUID, listener: ArtemisUiListener)] = []
+    private var isClosed = false
 
     public init(
         configuration: SDKConfiguration? = nil, environment: String? = nil,
         configResource: String = "sdk_configurations", runtimeUserContext: SDKUserContext? = nil,
-        onEvent: AgentChatEventHandler? = nil
+        onEvent: ArtemisUiListener? = nil
     ) {
         model = AgentChatViewModel(
             configuration: configuration, environment: environment, configResource: configResource,
             runtimeUserContext: runtimeUserContext)
         self.onEvent = onEvent
-        model.eventHandler = { [weak self] event in self?.onEvent?(event) }
+        model.uiEventHandler = { [weak self] event in self?.emit(event) }
     }
-    func minimize() { isMinimized = true }
-    func reopen() { isMinimized = false }
+    /// Register for typed UI events. Keep the returned token and cancel it when the listener is no longer needed.
+    @discardableResult
+    public func addListener(_ listener: @escaping ArtemisUiListener) -> ArtemisUiEventRegistration {
+        precondition(!isClosed, "Artemis UI handle is closed")
+        let id = UUID()
+        uiEventListeners.append((id, listener))
+        return ArtemisUiEventRegistration { [weak self] in
+            self?.uiEventListeners.removeAll { $0.id == id }
+        }
+    }
+
+    private func emit(_ event: ArtemisUiEvent) {
+        onEvent?(event)
+        for entry in Array(uiEventListeners) { entry.listener(event) }
+    }
+
+    public func minimize() {
+        guard !isClosed, !isMinimized else { return }
+        isMinimized = true
+        emit(.minimized)
+    }
+    public func reopen() {
+        guard !isClosed else { return }
+        isMinimized = false
+    }
     public func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        emit(.closed(reason: "HANDLE_CLOSED"))
         isMinimized = false
         model.stop()
+        uiEventListeners.removeAll()
     }
     public func endSession() {
+        guard !isClosed else { return }
+        emit(.sessionEnded(reason: "END_SESSION"))
+        emit(.closed(reason: "END_SESSION"))
         isMinimized = false
         model.stop(endingSession: true)
     }
@@ -37,7 +69,7 @@ import SwiftUI
 extension AgentChatUI {
     @MainActor public static func initialize(
         configuration: SDKConfiguration? = nil, environment: String? = nil,
-        runtimeUserContext: SDKUserContext? = nil, onEvent: AgentChatEventHandler? = nil
+        runtimeUserContext: SDKUserContext? = nil, onEvent: ArtemisUiListener? = nil
     ) -> AgentChatHandle {
         AgentChatHandle(
             configuration: configuration, environment: environment, runtimeUserContext: runtimeUserContext,
