@@ -87,9 +87,9 @@ final class CustomerSessionBootstrapProvider: @unchecked Sendable {
     /// one-time initial token to the iOS SDK's async token-provider interface.
     static func makeSDKConfigurationFromEnvironment() async throws -> SDKConfiguration {
         let environment = ProcessInfo.processInfo.environment
+        let projectID = configuredValue("ARTEMIS_SAMPLE_PROJECT_ID", in: environment) ?? ""
         let endpoint = configuredValue("ARTEMIS_SAMPLE_ENDPOINT", in: environment)
             ?? "https://agents-dev.kore.ai"
-        let projectID = configuredValue("ARTEMIS_SAMPLE_PROJECT_ID", in: environment) ?? ""
         let tenantID = configuredValue("ARTEMIS_SAMPLE_TENANT_ID", in: environment) ?? ""
         let channelSecret = configuredValue("ARTEMIS_SAMPLE_CHANNEL_SECRET", in: environment) ?? ""
         let verifiedUserID = configuredValue("ARTEMIS_SAMPLE_VERIFIED_USER_ID", in: environment) ?? ""

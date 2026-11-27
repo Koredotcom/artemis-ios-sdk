@@ -9,24 +9,41 @@ struct ArtemisUIExampleApp: App {
 struct ContentView: View {
     @State private var presentedChat: ChatPresentation?
     @State private var chatHandle: AgentChatHandle?
+    @State private var eventRegistration: ArtemisUiEventRegistration?
+
+    private let projectID = "your-project-id"
+    private let endpoint = "https://runtime.example.com"
+    private let channelID = "your-channel-id"
     
     // Replace these values with the host application's runtime configuration.
-    private let configuration = SDKConfiguration(
-        environment: "dev",
-        connection: ConnectionConfig(
-            projectId: "your-project-id", endpoint: "https://runtime.example.com", apiKey: "pk_your_public_key"),
-        channel: ChannelConfig(channelId: "your-channel-id")
-    )
+    private let apiKey = "pk_your_public_key"
+    
+    // Set this environment variable in the app scheme to use Bootstrap Token Authentication.
+    private let bootstrapToken = ProcessInfo.processInfo.environment["ARTEMIS_SAMPLE_BOOTSTRAP_TOKEN"]
+
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
                 Button("Open Agent Chat") {
                     let handle = chatHandle ?? AgentChatUI.initialize(
-                        configuration: configuration,
-                        onEvent: { event in
-                            print(event.eventCode, event.eventMessage, event.eventReason)
-                        }
+                        configuration: configuration
                     )
+                    eventRegistration = handle.addListener { event in
+                        switch event {
+                        case .connectionChanged(let status, let detail):
+                            print("Chat connection:", status, detail ?? "")
+                        case .messageSent(let messageId):
+                            print("Message accepted:", messageId)
+                        case .deepLinkClicked(let url, let title, let messageId):
+                            print("Deep link tapped:", url, title ?? "", messageId ?? "")
+                        case .minimized:
+                            print("Chat minimized by user")
+                        case .closed(let reason):
+                            print("Chat closed:", reason)
+                        default:
+                            break
+                        }
+                    }
                     chatHandle = handle
                     presentedChat = ChatPresentation(handle: handle)
                 }.buttonStyle(.borderedProminent)
@@ -37,7 +54,7 @@ struct ContentView: View {
                 NavigationView {
                     AgentChatUI.view(
                         handle: presentation.handle,
-                        title: "Agent Chat",
+                        title: "PhoneStore SDK",
                         fonts: ChatFonts(family: nil, monospaceFamily: "Menlo"),
 //                        headerBuilder: { header in AnyView(ExampleChatHeader(context: header)) },
 //                        footerBuilder: { footer in AnyView(ExampleChatFooter(context: footer)) },
@@ -49,6 +66,27 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private var configuration: SDKConfiguration {
+        let token = bootstrapToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let usesBootstrapToken = !token.isEmpty
+
+        return SDKConfiguration(
+            environment: "dev",
+            connection: ConnectionConfig(
+                projectId: projectID,
+                endpoint: endpoint,
+                apiKey: usesBootstrapToken ? nil : apiKey,
+                bootstrapToken: usesBootstrapToken ? token : nil
+            ),
+            // Bootstrap tokens carry their own channel and user scope.
+            channel: usesBootstrapToken ? nil : ChannelConfig(channelId: channelID),
+            // Optional host-app settings:
+            // theme: ThemeConfig(messageTimestampFormat: "EE, MMM dd yyyy 'at' hh:mm:ss a"),
+            // debug: DebugConfig(enabled: true, logLevel: "debug", logWebsocketMessages: true, printLogs: true),
+            // features: FeaturesConfig(sendAllDeepLink: true)
+        )
     }
 
     private var exampleTemplateRegistry: RichTemplateRegistry {
