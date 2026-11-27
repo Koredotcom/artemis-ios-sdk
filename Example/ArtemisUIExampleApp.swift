@@ -39,20 +39,22 @@ struct ContentView: View {
                     let handle = chatHandle ?? AgentChatUI.initialize(
                         configuration: configuration
                     )
-                    eventRegistration = handle.addListener { event in
-                        switch event {
-                        case .connectionChanged(let status, let detail):
-                            print("Chat connection:", status, detail ?? "")
-                        case .messageSent(let messageId):
-                            print("Message accepted:", messageId)
-                        case .deepLinkClicked(let url, let title, let messageId):
-                            print("Deep link tapped:", url, title ?? "", messageId ?? "")
-                        case .minimized:
-                            print("Chat minimized by user")
-                        case .closed(let reason):
-                            print("Chat closed:", reason)
-                        default:
-                            break
+                    if eventRegistration == nil {
+                        eventRegistration = handle.addListener { event in
+                            switch event {
+                            case .connectionChanged(let status, let detail):
+                                print("Chat connection:", status, detail ?? "")
+                            case .messageSent(let messageId):
+                                print("Message accepted:", messageId)
+                            case .deepLinkClicked(let url, let title, let messageId):
+                                print("Deep link tapped:", url, title ?? "", messageId ?? "")
+                            case .minimized:
+                                print("Chat minimized by user")
+                            case .closed(let reason):
+                                print("Chat closed:", reason)
+                            default:
+                                break
+                            }
                         }
                     }
                     chatHandle = handle
